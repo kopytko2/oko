@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Oko - Browser Automation for Ona",
+  "version": "0.1.0",
+  "description": "Browser automation tools for Ona development environments",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "alarms",
+    "debugger",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "ws://localhost/*",
+    "http://127.0.0.1/*",
+    "ws://127.0.0.1/*",
+    "https://*.gitpod.dev/*",
+    "wss://*.gitpod.dev/*",
+    "https://*.gitpod.io/*",
+    "wss://*.gitpod.io/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Oko",
+    "default_popup": "popup.html"
+  }
+}
