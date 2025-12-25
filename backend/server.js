@@ -360,6 +360,7 @@ app.post('/api/browser/click', async (req, res) => {
 app.get('/api/browser/screenshot', async (req, res) => {
   const requestId = crypto.randomUUID()
   const tabId = req.query.tabId ? parseInt(req.query.tabId) : undefined
+  const fullPage = req.query.fullPage === 'true' || req.query.fullPage === '1'
   
   let extensionClient = null
   for (const [, client] of clients) {
@@ -376,13 +377,16 @@ app.get('/api/browser/screenshot', async (req, res) => {
   extensionClient.ws.send(JSON.stringify({
     type: 'browser-screenshot',
     requestId,
-    tabId
+    tabId,
+    fullPage
   }))
   
+  // Longer timeout for full page (can be slow for long pages)
+  const timeoutMs = fullPage ? 30000 : 10000
   const timeout = setTimeout(() => {
     pendingRequests.delete(requestId)
     res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
+  }, timeoutMs)
   
   pendingRequests.set(requestId, { res, timeout })
 })

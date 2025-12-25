@@ -432,11 +432,15 @@ async function handleListTabs(message) {
 async function handleScreenshot(message) {
   try {
     const tabId = message.tabId
+    const fullPage = message.fullPage || false
     
     // Remember original tab to return to
     const [originalTab] = await chrome.tabs.query({ active: true, currentWindow: true })
     const originalTabId = originalTab?.id
     const originalWindowId = originalTab?.windowId
+    
+    // Get target tab
+    const targetTabId = tabId || originalTabId
     
     // If tabId specified, switch to that tab first
     if (tabId && tabId !== originalTabId) {
@@ -447,7 +451,15 @@ async function handleScreenshot(message) {
       await new Promise(r => setTimeout(r, 150))
     }
     
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
+    let dataUrl
+    
+    if (fullPage) {
+      // Use Debugger API for full page screenshot
+      dataUrl = await captureFullPage(targetTabId)
+    } else {
+      // Standard viewport capture
+      dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
+    }
     
     // Return to original tab (likely Ona/Gitpod tab)
     if (tabId && tabId !== originalTabId && originalTabId) {
@@ -470,6 +482,56 @@ async function handleScreenshot(message) {
       success: false,
       error: err.message
     })
+  }
+}
+
+/**
+ * Capture full page screenshot using Chrome Debugger API
+ */
+async function captureFullPage(tabId) {
+  const debugTarget = { tabId }
+  
+  try {
+    // Attach debugger
+    await chrome.debugger.attach(debugTarget, '1.3')
+    
+    // Get page metrics
+    const metrics = await chrome.debugger.sendCommand(debugTarget, 'Page.getLayoutMetrics')
+    
+    // Get full page dimensions
+    const width = Math.ceil(metrics.contentSize.width)
+    const height = Math.ceil(metrics.contentSize.height)
+    
+    // Set device metrics to full page size
+    await chrome.debugger.sendCommand(debugTarget, 'Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+    
+    // Small delay for render
+    await new Promise(r => setTimeout(r, 100))
+    
+    // Capture screenshot
+    const result = await chrome.debugger.sendCommand(debugTarget, 'Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true
+    })
+    
+    // Clear device metrics override
+    await chrome.debugger.sendCommand(debugTarget, 'Emulation.clearDeviceMetricsOverride')
+    
+    // Detach debugger
+    await chrome.debugger.detach(debugTarget)
+    
+    return `data:image/png;base64,${result.data}`
+  } catch (err) {
+    // Make sure to detach on error
+    try {
+      await chrome.debugger.detach(debugTarget)
+    } catch {}
+    throw err
   }
 }
 

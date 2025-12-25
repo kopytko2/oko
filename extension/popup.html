@@ -33,6 +33,21 @@
     }
     input:focus { outline: none; border-color: #4a9eff; }
     .hint { font-size: 11px; color: #666; margin-top: 4px; }
+    .optional { color: #555; font-weight: normal; }
+    textarea {
+      width: 100%;
+      padding: 8px 10px;
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+      font-family: 'SF Mono', Monaco, monospace;
+      resize: vertical;
+      min-height: 60px;
+    }
+    textarea:focus { outline: none; border-color: #4a9eff; }
+    textarea::placeholder { color: #555; }
     .buttons { display: flex; gap: 8px; }
     button {
       flex: 1;
@@ -108,16 +123,25 @@
   
   <div class="section">
     <div class="section-title">Connection</div>
+    
+    <div class="field">
+      <label>Quick Config <span class="optional">(paste URL + token)</span></label>
+      <textarea id="quickConfig" placeholder="Paste your config here, e.g.:
+URL: https://8129--xxx.gitpod.dev
+Token: mysecrettoken123
+
+Or just paste both values and we'll detect them"></textarea>
+      <div class="hint">Auto-detects URL and token from pasted text</div>
+    </div>
+    
     <div class="field">
       <label>Backend URL</label>
       <input type="text" id="backendUrl" placeholder="http://localhost:8129">
-      <div class="hint">For Ona: use URL from <code>gitpod environment port open 8129</code></div>
     </div>
     
     <div class="field">
       <label>Auth Token</label>
       <input type="password" id="authToken" placeholder="Optional for localhost">
-      <div class="hint">Set OKO_AUTH_TOKEN in your environment</div>
     </div>
     
     <div class="buttons">

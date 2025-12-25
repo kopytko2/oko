@@ -5,6 +5,7 @@ const saveBtn = document.getElementById('saveBtn')
 const statusDiv = document.getElementById('status')
 const pickerBtn = document.getElementById('pickerBtn')
 const shortcutKey = document.getElementById('shortcutKey')
+const quickConfigInput = document.getElementById('quickConfig')
 
 let originalUrl = ''
 let originalToken = ''
@@ -12,6 +13,100 @@ let originalToken = ''
 // Detect Mac vs Windows/Linux for keyboard shortcut display
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
 shortcutKey.textContent = isMac ? '⌥⇧O' : 'Alt+Shift+O'
+
+// Smart paste detection for quick config
+quickConfigInput.addEventListener('input', () => {
+  const text = quickConfigInput.value
+  const parsed = parseConfig(text)
+  
+  if (parsed.url) {
+    backendUrlInput.value = parsed.url
+  }
+  if (parsed.token) {
+    authTokenInput.value = parsed.token
+  }
+  
+  if (parsed.url || parsed.token) {
+    checkDirty()
+    // Clear the textarea after successful parse
+    setTimeout(() => {
+      quickConfigInput.value = ''
+      showStatus('success', `Detected: ${parsed.url ? 'URL' : ''}${parsed.url && parsed.token ? ' + ' : ''}${parsed.token ? 'Token' : ''}`)
+    }, 100)
+  }
+})
+
+/**
+ * Parse config text to extract URL and token
+ * Supports formats:
+ * - URL: https://... \n Token: abc123
+ * - url=https://... token=abc123
+ * - https://... on one line, token on another
+ * - JSON: {"url": "...", "token": "..."}
+ */
+function parseConfig(text) {
+  const result = { url: null, token: null }
+  
+  if (!text || !text.trim()) return result
+  
+  // Try JSON format
+  try {
+    const json = JSON.parse(text)
+    if (json.url) result.url = json.url
+    if (json.token) result.token = json.token
+    if (json.backendUrl) result.url = json.backendUrl
+    if (json.authToken) result.token = json.authToken
+    if (result.url || result.token) return result
+  } catch {}
+  
+  // Look for URL patterns
+  const urlPatterns = [
+    /(?:url|backend|endpoint)[:\s=]+["']?(https?:\/\/[^\s"']+)/i,
+    /(?:url|backend|endpoint)[:\s=]+["']?([^\s"']+\.gitpod\.(?:dev|io)[^\s"']*)/i,
+    /(https?:\/\/\d+--[^\s]+\.gitpod\.(?:dev|io)[^\s]*)/i,
+    /(https?:\/\/[^\s]+:\d+)/,
+    /(https?:\/\/localhost[^\s]*)/i
+  ]
+  
+  for (const pattern of urlPatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      result.url = match[1].replace(/['"]+$/, '') // Strip trailing quotes
+      break
+    }
+  }
+  
+  // Look for token patterns
+  const tokenPatterns = [
+    /(?:token|auth|key|secret)[:\s=]+["']?([a-zA-Z0-9_-]{16,})/i,
+    /OKO_AUTH_TOKEN[=:\s]+["']?([a-zA-Z0-9_-]+)/i,
+    /^([a-f0-9]{32,64})$/im // Hex token on its own line
+  ]
+  
+  for (const pattern of tokenPatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      result.token = match[1].replace(/['"]+$/, '')
+      break
+    }
+  }
+  
+  // If we found a URL but no token, check for a standalone token-like string
+  if (result.url && !result.token) {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l)
+    for (const line of lines) {
+      // Skip the line with URL
+      if (line.includes(result.url)) continue
+      // Check if line looks like a token (alphanumeric, 16+ chars, no spaces)
+      if (/^[a-zA-Z0-9_-]{16,}$/.test(line)) {
+        result.token = line
+        break
+      }
+    }
+  }
+  
+  return result
+}
 
 // Element picker button
 pickerBtn.addEventListener('click', async () => {
