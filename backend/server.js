@@ -286,6 +286,42 @@ setInterval(() => {
   }
 }, SELECTION_TTL_MS)
 
+app.post('/api/browser/element-info', async (req, res) => {
+  const requestId = crypto.randomUUID()
+  const { tabId, selector, includeStyles } = req.body
+  
+  if (!selector) {
+    return res.status(400).json({ success: false, error: 'selector required' })
+  }
+  
+  let extensionClient = null
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClient = client
+      break
+    }
+  }
+  
+  if (!extensionClient) {
+    return res.status(503).json({ success: false, error: 'No extension connected' })
+  }
+  
+  extensionClient.ws.send(JSON.stringify({
+    type: 'browser-get-element-info',
+    requestId,
+    tabId,
+    selector,
+    includeStyles: includeStyles !== false
+  }))
+  
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, 10000)
+  
+  pendingRequests.set(requestId, { res, timeout })
+})
+
 app.post('/api/browser/click', async (req, res) => {
   const requestId = crypto.randomUUID()
   const { tabId, selector } = req.body

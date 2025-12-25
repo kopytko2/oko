@@ -433,16 +433,29 @@ async function handleScreenshot(message) {
   try {
     const tabId = message.tabId
     
+    // Remember original tab to return to
+    const [originalTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const originalTabId = originalTab?.id
+    const originalWindowId = originalTab?.windowId
+    
     // If tabId specified, switch to that tab first
-    if (tabId) {
+    if (tabId && tabId !== originalTabId) {
       const tab = await chrome.tabs.get(tabId)
       await chrome.tabs.update(tabId, { active: true })
       await chrome.windows.update(tab.windowId, { focused: true })
       // Small delay for tab to render
-      await new Promise(r => setTimeout(r, 100))
+      await new Promise(r => setTimeout(r, 150))
     }
     
     const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
+    
+    // Return to original tab (likely Ona/Gitpod tab)
+    if (tabId && tabId !== originalTabId && originalTabId) {
+      await chrome.tabs.update(originalTabId, { active: true })
+      if (originalWindowId) {
+        await chrome.windows.update(originalWindowId, { focused: true })
+      }
+    }
     
     sendToWebSocket({
       type: 'browser-screenshot-result',
@@ -548,6 +561,20 @@ async function handleClickElement(message) {
   try {
     const tabId = await getTargetTabId(message.tabId)
     
+    // Remember original tab to return to
+    const [originalTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const originalTabId = originalTab?.id
+    const originalWindowId = originalTab?.windowId
+    const needsSwitch = tabId !== originalTabId
+    
+    // Switch to target tab if needed
+    if (needsSwitch) {
+      const tab = await chrome.tabs.get(tabId)
+      await chrome.tabs.update(tabId, { active: true })
+      await chrome.windows.update(tab.windowId, { focused: true })
+      await new Promise(r => setTimeout(r, 100))
+    }
+    
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: (selector) => {
@@ -572,6 +599,17 @@ async function handleClickElement(message) {
     })
     
     const result = results?.[0]?.result || { success: false, error: 'Script failed' }
+    
+    // Return to original tab unless returnToOriginal is explicitly false
+    if (needsSwitch && message.returnToOriginal !== false && originalTabId) {
+      // Small delay to let click action complete
+      await new Promise(r => setTimeout(r, 200))
+      await chrome.tabs.update(originalTabId, { active: true })
+      if (originalWindowId) {
+        await chrome.windows.update(originalWindowId, { focused: true })
+      }
+    }
+    
     sendToWebSocket({
       type: 'browser-click-element-result',
       requestId: message.requestId,
