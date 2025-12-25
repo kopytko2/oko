@@ -286,6 +286,100 @@ setInterval(() => {
   }
 }, SELECTION_TTL_MS)
 
+app.post('/api/browser/network/enable', async (req, res) => {
+  const requestId = crypto.randomUUID()
+  const { tabId, urlFilter, maxRequests } = req.body
+  
+  let extensionClient = null
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClient = client
+      break
+    }
+  }
+  
+  if (!extensionClient) {
+    return res.status(503).json({ success: false, error: 'No extension connected' })
+  }
+  
+  extensionClient.ws.send(JSON.stringify({
+    type: 'browser-enable-network-capture',
+    requestId,
+    tabId,
+    urlFilter,
+    maxRequests
+  }))
+  
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, 10000)
+  
+  pendingRequests.set(requestId, { res, timeout })
+})
+
+app.post('/api/browser/network/disable', async (req, res) => {
+  const requestId = crypto.randomUUID()
+  
+  let extensionClient = null
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClient = client
+      break
+    }
+  }
+  
+  if (!extensionClient) {
+    return res.status(503).json({ success: false, error: 'No extension connected' })
+  }
+  
+  extensionClient.ws.send(JSON.stringify({
+    type: 'browser-disable-network-capture',
+    requestId
+  }))
+  
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, 10000)
+  
+  pendingRequests.set(requestId, { res, timeout })
+})
+
+app.get('/api/browser/network/requests', async (req, res) => {
+  const requestId = crypto.randomUUID()
+  const { tabId, type, urlPattern, limit, offset } = req.query
+  
+  let extensionClient = null
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClient = client
+      break
+    }
+  }
+  
+  if (!extensionClient) {
+    return res.status(503).json({ success: false, error: 'No extension connected' })
+  }
+  
+  extensionClient.ws.send(JSON.stringify({
+    type: 'browser-get-network-requests',
+    requestId,
+    tabId: tabId ? parseInt(tabId) : undefined,
+    type: type,
+    urlPattern,
+    limit: limit ? parseInt(limit) : 100,
+    offset: offset ? parseInt(offset) : 0
+  }))
+  
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, 10000)
+  
+  pendingRequests.set(requestId, { res, timeout })
+})
+
 app.post('/api/browser/element-info', async (req, res) => {
   const requestId = crypto.randomUUID()
   const { tabId, selector, includeStyles } = req.body
