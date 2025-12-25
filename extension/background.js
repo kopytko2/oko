@@ -632,6 +632,56 @@ async function handleFillInput(message) {
 }
 
 // =============================================================================
+// ELEMENT PICKER
+// =============================================================================
+
+/**
+ * Inject picker script into active tab
+ */
+async function injectPicker() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) {
+      console.error('[Background] No active tab found')
+      return
+    }
+
+    // Skip restricted URLs
+    if (tab.url?.startsWith('chrome://') || 
+        tab.url?.startsWith('chrome-extension://') ||
+        tab.url?.startsWith('edge://') ||
+        tab.url?.startsWith('about:')) {
+      console.log('[Background] Cannot inject into restricted URL:', tab.url)
+      return
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['picker.js']
+    })
+    console.log('[Background] Picker injected into tab:', tab.id)
+  } catch (err) {
+    console.error('[Background] Failed to inject picker:', err)
+  }
+}
+
+/**
+ * Handle element selection from picker
+ */
+function handleElementSelected(element, sender) {
+  console.log('[Background] Element selected:', element.selector)
+  
+  // Add tab info
+  element.tabId = sender.tab?.id
+  
+  // Send to backend via WebSocket
+  sendToWebSocket({
+    type: 'element-selected',
+    element
+  })
+}
+
+// =============================================================================
 // INITIALIZATION
 // =============================================================================
 
@@ -682,6 +732,23 @@ chrome.runtime.onConnect.addListener((port) => {
 // Handle extension install/update
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('[Background] Extension installed/updated:', details.reason)
+})
+
+// Handle keyboard shortcut commands
+chrome.commands.onCommand.addListener((command) => {
+  console.log('[Background] Command received:', command)
+  if (command === 'toggle-picker') {
+    injectPicker()
+  }
+})
+
+// Handle messages from content scripts (picker)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'ELEMENT_SELECTED') {
+    handleElementSelected(message.element, sender)
+    sendResponse({ success: true })
+  }
+  return true // Keep channel open for async response
 })
 
 // Keep service worker alive

@@ -198,6 +198,18 @@ app.use('/api/browser', requireAuth, browserApiLimiter)
 // Pending requests waiting for extension response
 const pendingRequests = new Map()
 
+// Selected elements per session (scoped by auth token)
+const selectedElements = new Map()
+const SELECTION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * Get session ID from auth token (for per-user scoping)
+ */
+function getSessionId(req) {
+  const token = req.headers['x-auth-token'] || ''
+  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 16)
+}
+
 app.get('/api/browser/tabs', async (req, res) => {
   const requestId = crypto.randomUUID()
   
@@ -221,6 +233,86 @@ app.get('/api/browser/tabs', async (req, res) => {
   }))
   
   // Wait for response
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, 10000)
+  
+  pendingRequests.set(requestId, { res, timeout })
+})
+
+/**
+ * Get session key for selected elements
+ * Uses auth token if provided, otherwise uses a fixed key for localhost/no-auth
+ */
+function getSelectionKey(req) {
+  // For localhost without OKO_AUTH_TOKEN env var, always use __local__
+  // This matches WS behavior and ignores any token the client might send
+  if (!process.env.OKO_AUTH_TOKEN && isLocalRequest(req)) {
+    return '__local__'
+  }
+  const token = req.headers['x-auth-token'] || req.query.token || ''
+  return token || '__local__'
+}
+
+// Get selected element for this session (scoped by auth token)
+app.get('/api/browser/selected-element', requireAuth, (req, res) => {
+  const key = getSelectionKey(req)
+  const entry = selectedElements.get(key)
+  
+  // Check TTL
+  if (!entry || Date.now() - entry.timestamp > SELECTION_TTL_MS) {
+    if (entry) selectedElements.delete(key)
+    return res.json({ success: false, error: 'No element selected (use Alt+Shift+O to pick an element)' })
+  }
+  
+  res.json({ success: true, element: entry.element })
+})
+
+// Clear selected element for this session
+app.delete('/api/browser/selected-element', requireAuth, (req, res) => {
+  const key = getSelectionKey(req)
+  selectedElements.delete(key)
+  res.json({ success: true })
+})
+
+// Periodic cleanup of expired selections (every 5 minutes)
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, entry] of selectedElements) {
+    if (now - entry.timestamp > SELECTION_TTL_MS) {
+      selectedElements.delete(key)
+    }
+  }
+}, SELECTION_TTL_MS)
+
+app.post('/api/browser/click', async (req, res) => {
+  const requestId = crypto.randomUUID()
+  const { tabId, selector } = req.body
+  
+  if (!selector) {
+    return res.status(400).json({ success: false, error: 'selector required' })
+  }
+  
+  let extensionClient = null
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClient = client
+      break
+    }
+  }
+  
+  if (!extensionClient) {
+    return res.status(503).json({ success: false, error: 'No extension connected' })
+  }
+  
+  extensionClient.ws.send(JSON.stringify({
+    type: 'browser-click-element',
+    requestId,
+    tabId,
+    selector
+  }))
+  
   const timeout = setTimeout(() => {
     pendingRequests.delete(requestId)
     res.status(504).json({ success: false, error: 'Extension timeout' })
@@ -289,8 +381,13 @@ wss.on('connection', (ws, req) => {
   }
   
   const clientId = crypto.randomUUID()
-  clients.set(clientId, { ws, type: 'unknown' })
-  console.log(`[WS] Client connected: ${clientId}`)
+  // Store token with client for session scoping
+  // For localhost without OKO_AUTH_TOKEN env var, always use __local__ key
+  // This ensures HTTP requests without token can still fetch selections
+  const isLocalNoAuth = isLocal && !process.env.OKO_AUTH_TOKEN
+  const selectionKey = isLocalNoAuth ? '__local__' : (token || clientId)
+  clients.set(clientId, { ws, type: 'unknown', token: selectionKey })
+  console.log(`[WS] Client connected: ${clientId}, selectionKey: ${selectionKey === '__local__' ? '__local__' : '***'}`)
   
   ws.on('message', (data) => {
     try {
@@ -326,6 +423,17 @@ function handleWebSocketMessage(clientId, message) {
       
     case 'ping':
       client.ws.send(JSON.stringify({ type: 'pong' }))
+      break
+      
+    case 'element-selected':
+      // Store selected element keyed by the WS auth token (session-scoped)
+      // The token was validated on connection, extract from client
+      const wsToken = client.token || clientId
+      console.log(`[WS] Element selected:`, message.element?.selector)
+      selectedElements.set(wsToken, {
+        element: message.element,
+        timestamp: Date.now()
+      })
       break
       
     default:
