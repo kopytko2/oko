@@ -3,9 +3,45 @@ const authTokenInput = document.getElementById('authToken')
 const testBtn = document.getElementById('testBtn')
 const saveBtn = document.getElementById('saveBtn')
 const statusDiv = document.getElementById('status')
+const pickerBtn = document.getElementById('pickerBtn')
+const shortcutKey = document.getElementById('shortcutKey')
 
 let originalUrl = ''
 let originalToken = ''
+
+// Detect Mac vs Windows/Linux for keyboard shortcut display
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+shortcutKey.textContent = isMac ? '⌥⇧O' : 'Alt+Shift+O'
+
+// Element picker button
+pickerBtn.addEventListener('click', async () => {
+  // Get active tab and inject picker
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  
+  if (!tab?.id) {
+    showStatus('error', 'No active tab')
+    return
+  }
+  
+  // Check for restricted URLs
+  if (tab.url?.startsWith('chrome://') || 
+      tab.url?.startsWith('chrome-extension://') ||
+      tab.url?.startsWith('edge://')) {
+    showStatus('error', 'Cannot select on this page')
+    return
+  }
+  
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['picker.js']
+    })
+    // Close popup after injecting
+    window.close()
+  } catch (err) {
+    showStatus('error', 'Failed to start picker')
+  }
+})
 
 // Load saved settings
 async function loadSettings() {

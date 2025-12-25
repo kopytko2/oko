@@ -12,6 +12,14 @@
       padding: 16px;
     }
     h1 { font-size: 18px; margin-bottom: 16px; color: #fff; }
+    .section { margin-bottom: 20px; }
+    .section-title { 
+      font-size: 11px; 
+      text-transform: uppercase; 
+      color: #666; 
+      margin-bottom: 10px;
+      letter-spacing: 0.5px;
+    }
     .field { margin-bottom: 12px; }
     label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
     input {
@@ -25,7 +33,7 @@
     }
     input:focus { outline: none; border-color: #4a9eff; }
     .hint { font-size: 11px; color: #666; margin-top: 4px; }
-    .buttons { display: flex; gap: 8px; margin-top: 16px; }
+    .buttons { display: flex; gap: 8px; }
     button {
       flex: 1;
       padding: 10px;
@@ -40,6 +48,31 @@
     .btn-save { background: #059669; color: #fff; }
     .btn-save:hover { background: #047857; }
     .btn-save:disabled { background: #333; color: #666; cursor: not-allowed; }
+    .btn-picker { 
+      background: #f97316; 
+      color: #fff; 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-picker:hover { background: #ea580c; }
+    .picker-icon { font-size: 16px; }
+    .shortcut-hint {
+      text-align: center;
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+    }
+    .shortcut-hint kbd {
+      background: #16213e;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 10px;
+      color: #aaa;
+      border: 1px solid #333;
+    }
     .status {
       margin-top: 12px;
       padding: 8px;
@@ -50,29 +83,50 @@
     .status.success { display: block; background: #064e3b; color: #6ee7b7; }
     .status.error { display: block; background: #7f1d1d; color: #fca5a5; }
     .status.testing { display: block; background: #1e3a5f; color: #93c5fd; }
+    .divider {
+      height: 1px;
+      background: #333;
+      margin: 16px 0;
+    }
   </style>
 </head>
 <body>
-  <h1>Oko Connection</h1>
+  <h1>Oko</h1>
   
-  <div class="field">
-    <label>Backend URL</label>
-    <input type="text" id="backendUrl" placeholder="http://localhost:8129">
-    <div class="hint">For Ona: use URL from <code>gitpod environment port open 8129</code></div>
+  <div class="section">
+    <div class="section-title">Element Picker</div>
+    <button class="btn-picker" id="pickerBtn">
+      <span class="picker-icon">🎯</span>
+      <span>Select Element</span>
+    </button>
+    <div class="shortcut-hint">
+      or press <kbd id="shortcutKey">Alt+Shift+O</kbd>
+    </div>
   </div>
   
-  <div class="field">
-    <label>Auth Token</label>
-    <input type="password" id="authToken" placeholder="Optional for localhost">
-    <div class="hint">Set OKO_AUTH_TOKEN in your environment</div>
-  </div>
+  <div class="divider"></div>
   
-  <div class="buttons">
-    <button class="btn-test" id="testBtn">Test</button>
-    <button class="btn-save" id="saveBtn" disabled>Save</button>
+  <div class="section">
+    <div class="section-title">Connection</div>
+    <div class="field">
+      <label>Backend URL</label>
+      <input type="text" id="backendUrl" placeholder="http://localhost:8129">
+      <div class="hint">For Ona: use URL from <code>gitpod environment port open 8129</code></div>
+    </div>
+    
+    <div class="field">
+      <label>Auth Token</label>
+      <input type="password" id="authToken" placeholder="Optional for localhost">
+      <div class="hint">Set OKO_AUTH_TOKEN in your environment</div>
+    </div>
+    
+    <div class="buttons">
+      <button class="btn-test" id="testBtn">Test</button>
+      <button class="btn-save" id="saveBtn" disabled>Save</button>
+    </div>
+    
+    <div class="status" id="status"></div>
   </div>
-  
-  <div class="status" id="status"></div>
 
   <script src="popup.js"></script>
 </body>
