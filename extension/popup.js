@@ -6,13 +6,67 @@ const statusDiv = document.getElementById('status')
 const pickerBtn = document.getElementById('pickerBtn')
 const shortcutKey = document.getElementById('shortcutKey')
 const quickConfigInput = document.getElementById('quickConfig')
+const statusDot = document.getElementById('statusDot')
+const statusText = document.getElementById('statusText')
+const collapseBtn = document.getElementById('collapseBtn')
+const connectionBody = document.getElementById('connectionBody')
+const connectionCard = document.getElementById('connectionCard')
+const disconnectBtn = document.getElementById('disconnectBtn')
 
 let originalUrl = ''
 let originalToken = ''
 
-// Detect Mac vs Windows/Linux for keyboard shortcut display
-const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-shortcutKey.textContent = isMac ? '⌥⇧O' : 'Alt+Shift+O'
+const isMac = navigator.platform.toUpperCase().includes('MAC')
+const shortcutModifier = isMac ? 'option' : 'alt'
+shortcutKey.textContent = `${shortcutModifier} + shift + A`
+
+function setConnectionCollapsed(collapsed) {
+  connectionBody.classList.toggle('collapsed', collapsed)
+  collapseBtn.textContent = collapsed ? 'Show' : 'Hide'
+}
+
+function setDisconnectVisible(visible) {
+  disconnectBtn.classList.toggle('hidden', !visible)
+}
+
+function setConnectionState(state, options = {}) {
+  const { autoCollapse = false } = options
+
+  if (state === 'connected') {
+    statusDot.className = 'status-dot connected'
+    statusText.textContent = 'Connected'
+    connectionCard.classList.add('connected')
+    setDisconnectVisible(true)
+    if (autoCollapse) {
+      setConnectionCollapsed(true)
+    }
+    return
+  }
+
+  if (state === 'offline') {
+    statusDot.className = 'status-dot offline'
+    statusText.textContent = 'Offline'
+    connectionCard.classList.remove('connected')
+    setDisconnectVisible(false)
+    if (autoCollapse) {
+      setConnectionCollapsed(false)
+    }
+  }
+}
+
+// Collapse functionality
+collapseBtn.addEventListener('click', () => {
+  const collapsed = !connectionBody.classList.contains('collapsed')
+  setConnectionCollapsed(collapsed)
+})
+
+disconnectBtn.addEventListener('click', async () => {
+  try {
+    await chrome.runtime.sendMessage({ type: 'DISCONNECT' })
+  } catch {}
+  showStatus('error', 'Disconnected')
+  setConnectionState('offline', { autoCollapse: true })
+})
 
 // Smart paste detection for quick config
 quickConfigInput.addEventListener('input', () => {
@@ -150,6 +204,8 @@ async function loadSettings() {
   
   originalUrl = backendUrlInput.value
   originalToken = authTokenInput.value
+
+  refreshConnectionStatus()
 }
 
 // Check if settings changed
@@ -160,8 +216,36 @@ function checkDirty() {
 
 // Show status message
 function showStatus(type, message) {
-  statusDiv.className = `status ${type}`
+  statusDiv.className = `status-msg ${type} visible`
   statusDiv.textContent = message
+  
+  // Update header status pill
+  if (type === 'success' && message.includes('Connected')) {
+    setConnectionState('connected', { autoCollapse: true })
+  } else if (type === 'error') {
+    setConnectionState('offline', { autoCollapse: true })
+  }
+}
+
+async function refreshConnectionStatus() {
+  const url = backendUrlInput.value.trim() || 'http://localhost:8129'
+  const token = authTokenInput.value.trim()
+  const headers = {}
+  if (token) headers['X-Auth-Token'] = token
+
+  try {
+    const response = await fetch(`${url}/api/health`, {
+      headers,
+      signal: AbortSignal.timeout(3000)
+    })
+    if (response.ok) {
+      setConnectionState('connected', { autoCollapse: true })
+    } else {
+      setConnectionState('offline', { autoCollapse: true })
+    }
+  } catch {
+    setConnectionState('offline', { autoCollapse: true })
+  }
 }
 
 // Test connection

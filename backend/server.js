@@ -20,6 +20,8 @@ const WS_AUTH_TOKEN_FILE = '/tmp/oko-auth-token'
 
 // Auth token: use environment variable for remote, generate random for local
 const WS_AUTH_TOKEN = process.env.OKO_AUTH_TOKEN || crypto.randomBytes(32).toString('hex')
+const EXTENSION_REQUEST_TIMEOUT_MS = 10000
+const EXTENSION_FULL_PAGE_TIMEOUT_MS = 30000
 
 // Write token to file for local development (extension can read it)
 if (!process.env.OKO_AUTH_TOKEN) {
@@ -210,40 +212,8 @@ function getSessionId(req) {
   return crypto.createHash('sha256').update(token).digest('hex').slice(0, 16)
 }
 
-app.get('/api/browser/tabs', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  
-  // Find extension client
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
-    }
-  }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
-  }
-  
-  // Send request to extension
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-list-tabs',
-    requestId
-  }))
-  
-  // Wait for response
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
-})
-
 /**
- * Get session key for selected elements
- * Uses auth token if provided, otherwise uses a fixed key for localhost/no-auth
+ * Get session key for selected elements and extension targeting
  */
 function getSelectionKey(req) {
   // For localhost without OKO_AUTH_TOKEN env var, always use __local__
@@ -255,6 +225,93 @@ function getSelectionKey(req) {
   return token || '__local__'
 }
 
+function parseInteger(value) {
+  if (value === undefined || value === null) return null
+  if (typeof value === 'number' && Number.isInteger(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isInteger(parsed)) return parsed
+  }
+  return null
+}
+
+function parseString(value, maxLength) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (maxLength && trimmed.length > maxLength) return null
+  return trimmed
+}
+
+function parseStringArray(value, maxLength) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) return null
+  const parsed = []
+  for (const item of value) {
+    const entry = parseString(item, maxLength)
+    if (!entry) return null
+    parsed.push(entry)
+  }
+  return parsed
+}
+
+function getExtensionClients() {
+  const extensionClients = []
+  for (const [, client] of clients) {
+    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
+      extensionClients.push(client)
+    }
+  }
+  return extensionClients
+}
+
+function findExtensionClient(req) {
+  const extensionClients = getExtensionClients()
+  if (extensionClients.length === 0) {
+    return { error: { status: 503, message: 'No extension connected' } }
+  }
+  if (extensionClients.length === 1) {
+    return { client: extensionClients[0] }
+  }
+  const selectionKey = getSelectionKey(req)
+  const matches = extensionClients.filter(client => client.token === selectionKey)
+  if (matches.length === 1) {
+    return { client: matches[0] }
+  }
+  return { error: { status: 409, message: 'Multiple extensions connected; specify auth token' } }
+}
+
+function sendToExtension(req, res, type, payload, timeoutMs = EXTENSION_REQUEST_TIMEOUT_MS) {
+  const { client, error } = findExtensionClient(req)
+  if (!client) {
+    res.status(error.status).json({ success: false, error: error.message })
+    return null
+  }
+
+  const requestId = crypto.randomUUID()
+  console.log(`[API] Sending ${type} to extension (requestId: ${requestId})`)
+  try {
+    client.ws.send(JSON.stringify({ type, requestId, ...payload }))
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err)
+    console.error('[WS] Failed to send message to extension:', message)
+    res.status(502).json({ success: false, error: 'Failed to send request to extension' })
+    return null
+  }
+
+  const timeout = setTimeout(() => {
+    pendingRequests.delete(requestId)
+    res.status(504).json({ success: false, error: 'Extension timeout' })
+  }, timeoutMs)
+
+  pendingRequests.set(requestId, { res, timeout })
+  return requestId
+}
+
+app.get('/api/browser/tabs', async (req, res) => {
+  sendToExtension(req, res, 'browser-list-tabs', {})
+})
+
 // Get selected element for this session (scoped by auth token)
 app.get('/api/browser/selected-element', requireAuth, (req, res) => {
   const key = getSelectionKey(req)
@@ -263,7 +320,7 @@ app.get('/api/browser/selected-element', requireAuth, (req, res) => {
   // Check TTL
   if (!entry || Date.now() - entry.timestamp > SELECTION_TTL_MS) {
     if (entry) selectedElements.delete(key)
-    return res.json({ success: false, error: 'No element selected (use Alt+Shift+O to pick an element)' })
+    return res.json({ success: false, error: 'No element selected (use Alt+Shift+A to pick an element)' })
   }
   
   res.json({ success: true, element: entry.element })
@@ -287,202 +344,214 @@ setInterval(() => {
 }, SELECTION_TTL_MS)
 
 app.post('/api/browser/network/enable', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  const { tabId, urlFilter, maxRequests } = req.body
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
-    }
+  const body = req.body || {}
+  const tabIdValue = body.tabId
+  const tabIdParsed = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabIdParsed === null || tabIdParsed < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
   }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
+  const tabId = tabIdValue === undefined ? undefined : tabIdParsed
+
+  const urlFilter = parseStringArray(body.urlFilter, 1000)
+  if (body.urlFilter !== undefined && !urlFilter) {
+    return res.status(400).json({ success: false, error: 'urlFilter must be an array of strings' })
   }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-enable-network-capture',
-    requestId,
+
+  const maxRequestsValue = body.maxRequests
+  const maxRequests = parseInteger(maxRequestsValue)
+  if (maxRequestsValue !== undefined && (maxRequests === null || maxRequests <= 0)) {
+    return res.status(400).json({ success: false, error: 'maxRequests must be a positive integer' })
+  }
+
+  sendToExtension(req, res, 'browser-enable-network-capture', {
     tabId,
     urlFilter,
     maxRequests
-  }))
-  
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
+  })
 })
 
 app.post('/api/browser/network/disable', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
-    }
-  }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
-  }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-disable-network-capture',
-    requestId
-  }))
-  
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
+  sendToExtension(req, res, 'browser-disable-network-capture', {})
 })
 
 app.get('/api/browser/network/requests', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  const { tabId, type, urlPattern, limit, offset } = req.query
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
-    }
+  const query = req.query || {}
+  const tabIdValue = query.tabId
+  const tabIdParsed = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabIdParsed === null || tabIdParsed < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
   }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
+  const tabId = tabIdValue === undefined ? undefined : tabIdParsed
+
+  const type = typeof query.type === 'string' ? query.type : undefined
+  if (query.type !== undefined && typeof query.type !== 'string') {
+    return res.status(400).json({ success: false, error: 'type must be a string' })
   }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-get-network-requests',
-    requestId,
-    tabId: tabId ? parseInt(tabId) : undefined,
-    type: type,
+
+  const urlPattern = typeof query.urlPattern === 'string' ? query.urlPattern : undefined
+  if (query.urlPattern !== undefined && typeof query.urlPattern !== 'string') {
+    return res.status(400).json({ success: false, error: 'urlPattern must be a string' })
+  }
+
+  const limitValue = query.limit
+  const limitParsed = parseInteger(limitValue)
+  if (limitValue !== undefined && (limitParsed === null || limitParsed < 1 || limitParsed > 1000)) {
+    return res.status(400).json({ success: false, error: 'limit must be an integer between 1 and 1000' })
+  }
+
+  const offsetValue = query.offset
+  const offsetParsed = parseInteger(offsetValue)
+  if (offsetValue !== undefined && (offsetParsed === null || offsetParsed < 0)) {
+    return res.status(400).json({ success: false, error: 'offset must be a non-negative integer' })
+  }
+
+  const limit = limitParsed ?? 100
+  const offset = offsetParsed ?? 0
+
+  sendToExtension(req, res, 'browser-get-network-requests', {
+    tabId,
+    resourceType: type,
     urlPattern,
-    limit: limit ? parseInt(limit) : 100,
-    offset: offset ? parseInt(offset) : 0
-  }))
-  
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
+    limit,
+    offset
+  })
+})
+
+// =============================================================================
+// DEBUGGER-BASED NETWORK CAPTURE (with response bodies)
+// =============================================================================
+
+app.post('/api/browser/debugger/enable', async (req, res) => {
+  const body = req.body || {}
+  const tabId = parseInteger(body.tabId)
+  if (tabId === null || tabId < 0) {
+    return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
+  }
+
+  const urlFilter = Array.isArray(body.urlFilter) ? body.urlFilter : undefined
+  const maxRequests = parseInteger(body.maxRequests) || 500
+  const captureBody = body.captureBody !== false
+
+  sendToExtension(req, res, 'browser-enable-debugger-capture', {
+    tabId,
+    urlFilter,
+    maxRequests,
+    captureBody
+  })
+})
+
+app.post('/api/browser/debugger/disable', async (req, res) => {
+  const body = req.body || {}
+  const tabId = parseInteger(body.tabId)
+  if (tabId === null || tabId < 0) {
+    return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
+  }
+
+  sendToExtension(req, res, 'browser-disable-debugger-capture', { tabId })
+})
+
+app.get('/api/browser/debugger/requests', async (req, res) => {
+  const query = req.query || {}
+  const tabId = parseInteger(query.tabId)
+  if (tabId === null || tabId < 0) {
+    return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
+  }
+
+  const urlPattern = typeof query.urlPattern === 'string' ? query.urlPattern : undefined
+  const resourceType = typeof query.resourceType === 'string' ? query.resourceType : undefined
+  const limit = parseInteger(query.limit) || 50
+  const offset = parseInteger(query.offset) || 0
+
+  sendToExtension(req, res, 'browser-get-debugger-requests', {
+    tabId,
+    urlPattern,
+    resourceType,
+    limit,
+    offset
+  })
+})
+
+app.delete('/api/browser/debugger/requests', async (req, res) => {
+  const query = req.query || {}
+  const tabId = parseInteger(query.tabId)
+  if (tabId === null || tabId < 0) {
+    return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
+  }
+
+  sendToExtension(req, res, 'browser-clear-debugger-requests', { tabId })
 })
 
 app.post('/api/browser/element-info', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  const { tabId, selector, includeStyles } = req.body
-  
+  const body = req.body || {}
+  const selector = parseString(body.selector, 1000)
   if (!selector) {
     return res.status(400).json({ success: false, error: 'selector required' })
   }
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let includeStyles = true
+  if (body.includeStyles !== undefined) {
+    if (typeof body.includeStyles !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'includeStyles must be a boolean' })
     }
+    includeStyles = body.includeStyles
   }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
-  }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-get-element-info',
-    requestId,
+
+  sendToExtension(req, res, 'browser-get-element-info', {
     tabId,
     selector,
-    includeStyles: includeStyles !== false
-  }))
-  
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
+    includeStyles
+  })
 })
 
 app.post('/api/browser/click', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  const { tabId, selector } = req.body
-  
+  const body = req.body || {}
+  const selector = parseString(body.selector, 1000)
   if (!selector) {
     return res.status(400).json({ success: false, error: 'selector required' })
   }
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
-    }
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
   }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
-  }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-click-element',
-    requestId,
+
+  sendToExtension(req, res, 'browser-click-element', {
     tabId,
     selector
-  }))
-  
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, 10000)
-  
-  pendingRequests.set(requestId, { res, timeout })
+  })
 })
 
 app.get('/api/browser/screenshot', async (req, res) => {
-  const requestId = crypto.randomUUID()
-  const tabId = req.query.tabId ? parseInt(req.query.tabId) : undefined
-  const fullPage = req.query.fullPage === 'true' || req.query.fullPage === '1'
-  
-  let extensionClient = null
-  for (const [, client] of clients) {
-    if (client.type === 'extension' && client.ws.readyState === WebSocket.OPEN) {
-      extensionClient = client
-      break
+  const query = req.query || {}
+  const tabIdValue = query.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let fullPage = false
+  if (query.fullPage !== undefined) {
+    if (query.fullPage === 'true' || query.fullPage === '1') {
+      fullPage = true
+    } else if (query.fullPage === 'false' || query.fullPage === '0') {
+      fullPage = false
+    } else {
+      return res.status(400).json({ success: false, error: 'fullPage must be true or false' })
     }
   }
-  
-  if (!extensionClient) {
-    return res.status(503).json({ success: false, error: 'No extension connected' })
-  }
-  
-  extensionClient.ws.send(JSON.stringify({
-    type: 'browser-screenshot',
-    requestId,
-    tabId,
-    fullPage
-  }))
-  
-  // Longer timeout for full page (can be slow for long pages)
-  const timeoutMs = fullPage ? 30000 : 10000
-  const timeout = setTimeout(() => {
-    pendingRequests.delete(requestId)
-    res.status(504).json({ success: false, error: 'Extension timeout' })
-  }, timeoutMs)
-  
-  pendingRequests.set(requestId, { res, timeout })
+
+  const timeoutMs = fullPage
+    ? EXTENSION_FULL_PAGE_TIMEOUT_MS
+    : EXTENSION_REQUEST_TIMEOUT_MS
+
+  sendToExtension(req, res, 'browser-screenshot', { tabId, fullPage }, timeoutMs)
 })
 
 // =============================================================================
@@ -573,12 +642,13 @@ function handleWebSocketMessage(clientId, message) {
     default:
       // Check if this is a response to a pending HTTP request
       if (message.requestId && pendingRequests.has(message.requestId)) {
+        console.log(`[API] Received response for requestId: ${message.requestId}, type: ${message.type}`)
         const pending = pendingRequests.get(message.requestId)
         clearTimeout(pending.timeout)
         pendingRequests.delete(message.requestId)
         pending.res.json(message)
       } else {
-        console.log(`[WS] Message from ${clientId}:`, message.type)
+        console.log(`[WS] Message from ${clientId}:`, message.type, message.requestId ? `(requestId: ${message.requestId})` : '')
       }
   }
 }
@@ -601,10 +671,24 @@ function broadcastToType(type, message) {
 
 server.listen(PORT, () => {
   console.log(`[Server] Oko backend listening on port ${PORT}`)
-  console.log(`[Server] Health check: http://localhost:${PORT}/api/health`)
-  if (process.env.OKO_AUTH_TOKEN) {
-    console.log('[Server] Remote auth enabled (OKO_AUTH_TOKEN set)')
+  
+  // Detect Ona/Gitpod environment and output copy/paste config
+  const gitpodEnvId = process.env.GITPOD_ENVIRONMENT_ID
+  if (gitpodEnvId) {
+    // Running in Ona environment - output the remote URL config
+    const region = process.env.GITPOD_REGION || 'us-east-1-01'
+    const backendUrl = `https://${PORT}--${gitpodEnvId}.${region}.gitpod.dev`
+    console.log('')
+    console.log('='.repeat(60))
+    console.log('  Oko Extension Config (copy/paste into Quick Config):')
+    console.log('='.repeat(60))
+    console.log(`URL: ${backendUrl}`)
+    console.log(`Token: ${WS_AUTH_TOKEN}`)
+    console.log('='.repeat(60))
+    console.log('')
   } else {
+    // Local development
+    console.log(`[Server] Health check: http://localhost:${PORT}/api/health`)
     console.log('[Server] Local mode (no auth required for localhost)')
   }
 })

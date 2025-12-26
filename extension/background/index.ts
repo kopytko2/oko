@@ -3,8 +3,8 @@
  * Entry point for the extension's background processes
  */
 
-import { connectedClients } from './state'
-import { connectWebSocket, initWebSocketAlarms } from './websocket'
+import { connectedClients, ws } from './state'
+import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms } from './websocket'
 import { initCacheListener } from '../lib/api'
 
 // Initialize on service worker start
@@ -34,6 +34,21 @@ chrome.runtime.onConnect.addListener((port) => {
   })
 })
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const type = message?.type as string | undefined
+  if (type === 'DISCONNECT') {
+    disconnectWebSocket()
+    sendResponse({ success: true })
+    return true
+  }
+  if (type === 'RECONNECT') {
+    connectWebSocket()
+    sendResponse({ success: true })
+    return true
+  }
+  return false
+})
+
 /**
  * Handle messages from extension pages
  */
@@ -46,11 +61,9 @@ function handleClientMessage(
   switch (type) {
     case 'GET_CONNECTION_STATUS':
       // Return current WebSocket connection status
-      import('./state').then(({ ws }) => {
-        port.postMessage({
-          type: 'CONNECTION_STATUS',
-          connected: ws?.readyState === WebSocket.OPEN
-        })
+      port.postMessage({
+        type: 'CONNECTION_STATUS',
+        connected: ws?.readyState === WebSocket.OPEN
       })
       break
 

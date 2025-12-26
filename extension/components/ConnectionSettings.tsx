@@ -7,8 +7,7 @@ import React, { useState, useEffect } from 'react'
 import {
   getConnectionSettings,
   saveConnectionSettings,
-  testConnection,
-  type ConnectionSettings
+  testConnection
 } from '../lib/connection'
 
 type TestStatus = 'idle' | 'testing' | 'success' | 'error'

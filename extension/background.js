@@ -57,6 +57,26 @@ let wsReconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 10
 const ALARM_WS_RECONNECT = 'ws-reconnect'
 const connectedClients = new Set()
+let connectInFlight = null
+const PING_INTERVAL_MS = 30000
+let pingIntervalId = null
+let lastPongTime = null
+let manualDisconnect = false
+
+function startPing() {
+  if (pingIntervalId !== null) return
+  pingIntervalId = setInterval(() => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }))
+    }
+  }, PING_INTERVAL_MS)
+}
+
+function stopPing() {
+  if (pingIntervalId === null) return
+  clearInterval(pingIntervalId)
+  pingIntervalId = null
+}
 
 function broadcastToClients(message) {
   connectedClients.forEach(port => {
@@ -74,6 +94,7 @@ function broadcastToClients(message) {
 // =============================================================================
 
 function sendToWebSocket(data) {
+  if (manualDisconnect) return
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(data))
   } else {
@@ -85,6 +106,8 @@ function sendToWebSocket(data) {
 }
 
 async function connectWebSocket() {
+  if (connectInFlight) return connectInFlight
+  manualDisconnect = false
   if (ws?.readyState === WebSocket.OPEN) return
   if (ws?.readyState === WebSocket.CONNECTING) return
 
@@ -93,79 +116,110 @@ async function connectWebSocket() {
     ws = null
   }
 
-  const connection = await getConnectionSettings()
-  let wsUrl = connection.wsUrl
+  const connectAttempt = (async () => {
+    const connection = await getConnectionSettings()
+    let wsUrl = connection.wsUrl
 
-  // Try to fetch auth token from backend
-  let tokenAcquired = false
-  try {
-    const tokenUrl = buildUrl(connection.apiUrl, '/api/auth/token')
-    const headers = {}
-    if (connection.authToken) {
-      headers['X-Auth-Token'] = connection.authToken
+    // Try to fetch auth token from backend
+    let tokenAcquired = false
+    try {
+      const tokenUrl = buildUrl(connection.apiUrl, '/api/auth/token')
+      const headers = {}
+      if (connection.authToken) {
+        headers['X-Auth-Token'] = connection.authToken
+      }
+      
+      const tokenResponse = await fetch(tokenUrl, { headers })
+      if (tokenResponse.ok) {
+        const data = await tokenResponse.json()
+        if (data.token) {
+          wsUrl = `${connection.wsUrl}?token=${data.token}`
+          tokenAcquired = true
+        }
+      }
+    } catch (err) {
+      console.log('[Background] Failed to fetch token from backend:', err)
     }
     
-    const tokenResponse = await fetch(tokenUrl, { headers })
-    if (tokenResponse.ok) {
-      const data = await tokenResponse.json()
-      if (data.token) {
-        wsUrl = `${connection.wsUrl}?token=${data.token}`
-        tokenAcquired = true
+    if (!tokenAcquired && connection.authToken) {
+      wsUrl = `${connection.wsUrl}?token=${connection.authToken}`
+    }
+
+    console.log('[Background] Connecting to WebSocket:', wsUrl.replace(/token=.*/, 'token=***'))
+    const newWs = new WebSocket(wsUrl)
+    ws = newWs
+
+    newWs.onopen = () => {
+      if (ws !== newWs) {
+        try { newWs.close() } catch {}
+        return
+      }
+      console.log('[Background] WebSocket connected')
+      wsReconnectAttempts = 0
+      chrome.alarms.clear(ALARM_WS_RECONNECT)
+      startPing()
+      sendToWebSocket({ type: 'identify', clientType: 'extension' })
+      broadcastToClients({ type: 'WS_CONNECTED' })
+    }
+
+    newWs.onmessage = (event) => {
+      console.log('[Background] WebSocket message received, length:', event.data?.length)
+      if (ws !== newWs) {
+        console.log('[Background] Ignoring message - stale WebSocket')
+        return
+      }
+      try {
+        const message = JSON.parse(event.data)
+        console.log('[Background] Parsed message type:', message.type)
+        routeWebSocketMessage(message)
+      } catch (err) {
+        console.error('[Background] Failed to parse WebSocket message:', err, event.data?.substring(0, 100))
       }
     }
-  } catch (err) {
-    console.log('[Background] Failed to fetch token from backend:', err)
-  }
-  
-  if (!tokenAcquired && connection.authToken) {
-    wsUrl = `${connection.wsUrl}?token=${connection.authToken}`
-  }
 
-  console.log('[Background] Connecting to WebSocket:', wsUrl.replace(/token=.*/, 'token=***'))
-  const newWs = new WebSocket(wsUrl)
-  ws = newWs
-
-  newWs.onopen = () => {
-    console.log('[Background] WebSocket connected')
-    wsReconnectAttempts = 0
-    chrome.alarms.clear(ALARM_WS_RECONNECT)
-    sendToWebSocket({ type: 'identify', clientType: 'extension' })
-    broadcastToClients({ type: 'WS_CONNECTED' })
-  }
-
-  newWs.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data)
-      routeWebSocketMessage(message)
-    } catch (err) {
-      console.error('[Background] Failed to parse WebSocket message:', err)
+    newWs.onerror = (error) => {
+      if (ws !== newWs) return
+      console.error('[Background] WebSocket error:', error)
     }
-  }
 
-  newWs.onerror = (error) => {
-    console.error('[Background] WebSocket error:', error)
-  }
+    newWs.onclose = (event) => {
+      if (ws !== newWs) return
+      console.log('[Background] WebSocket closed:', event.code, event.reason)
+      ws = null
+      stopPing()
+      broadcastToClients({ type: 'WS_DISCONNECTED' })
+      
+      if (!manualDisconnect && wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        scheduleReconnect()
+      }
+    }
+  })()
 
-  newWs.onclose = (event) => {
-    console.log('[Background] WebSocket closed:', event.code, event.reason)
-    ws = null
-    broadcastToClients({ type: 'WS_DISCONNECTED' })
-    
-    if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-      scheduleReconnect()
+  connectInFlight = connectAttempt
+  try {
+    await connectAttempt
+  } finally {
+    if (connectInFlight === connectAttempt) {
+      connectInFlight = null
     }
   }
 }
 
 function routeWebSocketMessage(message) {
   const type = message.type
+  console.log('[Background] Routing message type:', type)
 
   if (type?.startsWith('browser-') && type.endsWith('-result')) {
     broadcastToClients({ type: 'BROWSER_MCP_RESULT', data: message })
     return
   }
 
-  if (type === 'pong' || type === 'health') return
+  if (type === 'pong') {
+    lastPongTime = Date.now()
+    return
+  }
+
+  if (type === 'health') return
 
   // Handle browser MCP requests from backend
   if (type === 'browser-list-tabs') {
@@ -183,15 +237,28 @@ function routeWebSocketMessage(message) {
   } else if (type === 'browser-disable-network-capture') {
     handleDisableNetworkCapture(message)
   } else if (type === 'browser-get-network-requests') {
+    console.log('[Background] Calling handleGetNetworkRequests')
     handleGetNetworkRequests(message)
   } else if (type === 'browser-clear-network-requests') {
     handleClearNetworkRequests(message)
+  } else if (type === 'browser-enable-debugger-capture') {
+    handleEnableDebuggerCapture(message)
+  } else if (type === 'browser-disable-debugger-capture') {
+    handleDisableDebuggerCapture(message)
+  } else if (type === 'browser-get-debugger-requests') {
+    handleGetDebuggerRequests(message)
+  } else if (type === 'browser-clear-debugger-requests') {
+    handleClearDebuggerRequests(message)
   } else {
     broadcastToClients({ type: 'WS_MESSAGE', data: message })
   }
 }
 
 function scheduleReconnect() {
+  if (manualDisconnect) {
+    console.log('[Background] Auto-reconnect disabled (manual disconnect)')
+    return
+  }
   wsReconnectAttempts++
   if (wsReconnectAttempts > MAX_RECONNECT_ATTEMPTS) return
   
@@ -199,6 +266,15 @@ function scheduleReconnect() {
   console.log(`[Background] Scheduling reconnect in ${delaySeconds}s (attempt ${wsReconnectAttempts})`)
   
   chrome.alarms.create(ALARM_WS_RECONNECT, { delayInMinutes: delaySeconds / 60 })
+}
+
+function disconnectWebSocket() {
+  manualDisconnect = true
+  chrome.alarms.clear(ALARM_WS_RECONNECT)
+  stopPing()
+  if (ws && ws.readyState !== WebSocket.CLOSED) {
+    try { ws.close(1000, 'Manual disconnect') } catch {}
+  }
 }
 
 // =============================================================================
@@ -211,6 +287,9 @@ let captureConfig = {
   maxRequests: 1000,
   redactHeaders: ['authorization', 'cookie', 'set-cookie', 'x-auth-token']
 }
+const CAPTURE_TTL_MS = 30 * 60 * 1000
+const CAPTURE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+let lastCleanupTime = 0
 let networkListenersRegistered = false
 
 function redactHeaders(headers) {
@@ -224,6 +303,13 @@ function redactHeaders(headers) {
   })
 }
 
+function normalizeTabId(tabId) {
+  if (typeof tabId !== 'number' || !Number.isInteger(tabId) || tabId < 0) {
+    return undefined
+  }
+  return tabId
+}
+
 function matchesUrlFilter(url) {
   if (!captureConfig.urlFilter || captureConfig.urlFilter.length === 0) return true
   return captureConfig.urlFilter.some(pattern => {
@@ -235,10 +321,29 @@ function matchesUrlFilter(url) {
   })
 }
 
+function pruneCapturedRequests(now) {
+  if (capturedRequests.size === 0) return
+  const cutoff = now - CAPTURE_TTL_MS
+  for (const [id, req] of capturedRequests) {
+    if (req.startTime < cutoff) {
+      capturedRequests.delete(id)
+    }
+  }
+}
+
+function maybePruneCapturedRequests() {
+  const now = Date.now()
+  if (now - lastCleanupTime < CAPTURE_CLEANUP_INTERVAL_MS) return
+  lastCleanupTime = now
+  pruneCapturedRequests(now)
+}
+
 function onBeforeRequest(details) {
   if (!captureConfig.enabled) return
   if (captureConfig.tabId !== undefined && details.tabId !== captureConfig.tabId) return
   if (!matchesUrlFilter(details.url)) return
+
+  maybePruneCapturedRequests()
   
   if (capturedRequests.size >= captureConfig.maxRequests) {
     const oldest = capturedRequests.keys().next().value
@@ -319,9 +424,10 @@ function unregisterNetworkListeners() {
 }
 
 function handleEnableNetworkCapture(message) {
+  const tabId = normalizeTabId(message.tabId)
   captureConfig = {
     enabled: true,
-    tabId: message.tabId,
+    tabId,
     urlFilter: message.urlFilter,
     maxRequests: message.maxRequests || 1000,
     redactHeaders: message.redactHeaders || ['authorization', 'cookie', 'set-cookie', 'x-auth-token']
@@ -346,43 +452,63 @@ function handleDisableNetworkCapture(message) {
 }
 
 function handleGetNetworkRequests(message) {
-  let requests = Array.from(capturedRequests.values())
-  
-  if (message.tabId !== undefined) {
-    requests = requests.filter(r => r.tabId === message.tabId)
+  try {
+    console.log('[Network] handleGetNetworkRequests called, requestId:', message.requestId)
+    maybePruneCapturedRequests()
+    let requests = Array.from(capturedRequests.values())
+    console.log('[Network] Total captured requests:', requests.length)
+    
+    const tabId = normalizeTabId(message.tabId)
+    if (tabId !== undefined) {
+      requests = requests.filter(r => r.tabId === tabId)
+    }
+    if (message.resourceType) {
+      requests = requests.filter(r => r.type === message.resourceType)
+    }
+    if (message.urlPattern) {
+      try {
+        const regex = new RegExp(message.urlPattern, 'i')
+        requests = requests.filter(r => regex.test(r.url))
+      } catch {}
+    }
+    
+    requests.sort((a, b) => b.startTime - a.startTime)
+    
+    const offset = message.offset || 0
+    const limit = message.limit || 100
+    const total = requests.length
+    const paginated = requests.slice(offset, offset + limit)
+    
+    console.log('[Network] Sending response with', paginated.length, 'requests')
+    sendToWebSocket({
+      type: 'browser-get-network-requests-result',
+      requestId: message.requestId,
+      success: true,
+      total,
+      offset,
+      limit,
+      requests: paginated
+    })
+  } catch (err) {
+    console.error('[Network] Error in handleGetNetworkRequests:', err)
+    sendToWebSocket({
+      type: 'browser-get-network-requests-result',
+      requestId: message.requestId,
+      success: false,
+      error: err.message || String(err)
+    })
   }
-  if (message.type) {
-    requests = requests.filter(r => r.type === message.type)
-  }
-  if (message.urlPattern) {
-    try {
-      const regex = new RegExp(message.urlPattern, 'i')
-      requests = requests.filter(r => regex.test(r.url))
-    } catch {}
-  }
-  
-  requests.sort((a, b) => b.startTime - a.startTime)
-  
-  const offset = message.offset || 0
-  const limit = message.limit || 100
-  const total = requests.length
-  const paginated = requests.slice(offset, offset + limit)
-  
-  sendToWebSocket({
-    type: 'browser-get-network-requests-result',
-    requestId: message.requestId,
-    success: true,
-    total,
-    offset,
-    limit,
-    requests: paginated
-  })
 }
 
+setInterval(() => {
+  pruneCapturedRequests(Date.now())
+}, CAPTURE_CLEANUP_INTERVAL_MS)
+
 function handleClearNetworkRequests(message) {
-  if (message.tabId !== undefined) {
+  const tabId = normalizeTabId(message.tabId)
+  if (tabId !== undefined) {
     for (const [id, req] of capturedRequests) {
-      if (req.tabId === message.tabId) {
+      if (req.tabId === tabId) {
         capturedRequests.delete(id)
       }
     }
@@ -396,6 +522,286 @@ function handleClearNetworkRequests(message) {
     remaining: capturedRequests.size
   })
 }
+
+// =============================================================================
+// DEBUGGER-BASED NETWORK CAPTURE (with response bodies)
+// =============================================================================
+
+const debuggerSessions = new Map() // tabId -> { requests: Map, config: object }
+const DEBUGGER_VERSION = '1.3'
+
+/**
+ * Enable debugger-based network capture for a tab
+ * This captures full request/response bodies but shows a warning banner
+ */
+async function handleEnableDebuggerCapture(message) {
+  const tabId = message.tabId
+  if (!tabId) {
+    sendToWebSocket({
+      type: 'browser-enable-debugger-capture-result',
+      requestId: message.requestId,
+      success: false,
+      error: 'tabId is required for debugger capture'
+    })
+    return
+  }
+
+  try {
+    // Check if already attached
+    if (debuggerSessions.has(tabId)) {
+      sendToWebSocket({
+        type: 'browser-enable-debugger-capture-result',
+        requestId: message.requestId,
+        success: true,
+        message: 'Debugger already attached to this tab'
+      })
+      return
+    }
+
+    // Attach debugger to tab
+    await chrome.debugger.attach({ tabId }, DEBUGGER_VERSION)
+    
+    // Enable Network domain
+    await chrome.debugger.sendCommand({ tabId }, 'Network.enable', {
+      maxResourceBufferSize: 10 * 1024 * 1024, // 10MB
+      maxTotalBufferSize: 50 * 1024 * 1024 // 50MB
+    })
+
+    // Store session
+    debuggerSessions.set(tabId, {
+      requests: new Map(),
+      config: {
+        urlFilter: message.urlFilter,
+        maxRequests: message.maxRequests || 500,
+        captureBody: message.captureBody !== false
+      }
+    })
+
+    sendToWebSocket({
+      type: 'browser-enable-debugger-capture-result',
+      requestId: message.requestId,
+      success: true,
+      tabId
+    })
+  } catch (err) {
+    sendToWebSocket({
+      type: 'browser-enable-debugger-capture-result',
+      requestId: message.requestId,
+      success: false,
+      error: err.message
+    })
+  }
+}
+
+/**
+ * Disable debugger-based network capture for a tab
+ */
+async function handleDisableDebuggerCapture(message) {
+  const tabId = message.tabId
+  if (!tabId) {
+    sendToWebSocket({
+      type: 'browser-disable-debugger-capture-result',
+      requestId: message.requestId,
+      success: false,
+      error: 'tabId is required'
+    })
+    return
+  }
+
+  try {
+    if (debuggerSessions.has(tabId)) {
+      await chrome.debugger.detach({ tabId })
+      debuggerSessions.delete(tabId)
+    }
+
+    sendToWebSocket({
+      type: 'browser-disable-debugger-capture-result',
+      requestId: message.requestId,
+      success: true
+    })
+  } catch (err) {
+    // Might already be detached
+    debuggerSessions.delete(tabId)
+    sendToWebSocket({
+      type: 'browser-disable-debugger-capture-result',
+      requestId: message.requestId,
+      success: true,
+      warning: err.message
+    })
+  }
+}
+
+/**
+ * Get captured requests with bodies from debugger session
+ */
+function handleGetDebuggerRequests(message) {
+  const tabId = message.tabId
+  if (!tabId) {
+    sendToWebSocket({
+      type: 'browser-get-debugger-requests-result',
+      requestId: message.requestId,
+      success: false,
+      error: 'tabId is required'
+    })
+    return
+  }
+
+  const session = debuggerSessions.get(tabId)
+  if (!session) {
+    sendToWebSocket({
+      type: 'browser-get-debugger-requests-result',
+      requestId: message.requestId,
+      success: false,
+      error: 'No debugger session for this tab. Call enable-debugger-capture first.'
+    })
+    return
+  }
+
+  let requests = Array.from(session.requests.values())
+
+  // Filter by URL pattern
+  if (message.urlPattern) {
+    try {
+      const regex = new RegExp(message.urlPattern, 'i')
+      requests = requests.filter(r => regex.test(r.url))
+    } catch {}
+  }
+
+  // Filter by resource type
+  if (message.resourceType) {
+    requests = requests.filter(r => r.type === message.resourceType)
+  }
+
+  // Sort by timestamp (newest first)
+  requests.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+
+  // Pagination
+  const offset = message.offset || 0
+  const limit = message.limit || 50
+  const total = requests.length
+  const paginated = requests.slice(offset, offset + limit)
+
+  sendToWebSocket({
+    type: 'browser-get-debugger-requests-result',
+    requestId: message.requestId,
+    success: true,
+    total,
+    offset,
+    limit,
+    requests: paginated
+  })
+}
+
+/**
+ * Clear debugger captured requests for a tab
+ */
+function handleClearDebuggerRequests(message) {
+  const tabId = message.tabId
+  if (!tabId) {
+    sendToWebSocket({
+      type: 'browser-clear-debugger-requests-result',
+      requestId: message.requestId,
+      success: false,
+      error: 'tabId is required'
+    })
+    return
+  }
+
+  const session = debuggerSessions.get(tabId)
+  if (session) {
+    session.requests.clear()
+  }
+
+  sendToWebSocket({
+    type: 'browser-clear-debugger-requests-result',
+    requestId: message.requestId,
+    success: true
+  })
+}
+
+// Debugger event handler
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  const tabId = source.tabId
+  const session = debuggerSessions.get(tabId)
+  if (!session) return
+
+  const { requests, config } = session
+
+  if (method === 'Network.requestWillBeSent') {
+    const { requestId, request, timestamp, type } = params
+    
+    // Apply URL filter
+    if (config.urlFilter && config.urlFilter.length > 0) {
+      const matches = config.urlFilter.some(pattern => {
+        try {
+          return new RegExp(pattern, 'i').test(request.url)
+        } catch {
+          return false
+        }
+      })
+      if (!matches) return
+    }
+
+    // Enforce max requests
+    if (requests.size >= config.maxRequests) {
+      const oldest = requests.keys().next().value
+      if (oldest) requests.delete(oldest)
+    }
+
+    requests.set(requestId, {
+      requestId,
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      postData: request.postData,
+      type: type || 'Other',
+      timestamp: timestamp * 1000,
+      tabId
+    })
+  }
+
+  if (method === 'Network.responseReceived') {
+    const { requestId, response } = params
+    const req = requests.get(requestId)
+    if (req) {
+      req.status = response.status
+      req.statusText = response.statusText
+      req.responseHeaders = response.headers
+      req.mimeType = response.mimeType
+    }
+  }
+
+  if (method === 'Network.loadingFinished') {
+    const { requestId } = params
+    const req = requests.get(requestId)
+    if (req && config.captureBody) {
+      // Fetch response body
+      chrome.debugger.sendCommand(
+        { tabId },
+        'Network.getResponseBody',
+        { requestId }
+      ).then(result => {
+        if (result) {
+          req.responseBody = result.base64Encoded 
+            ? `[base64] ${result.body.substring(0, 1000)}${result.body.length > 1000 ? '...' : ''}`
+            : result.body
+          req.responseBodyTruncated = result.body.length > 100000
+          if (req.responseBodyTruncated) {
+            req.responseBody = result.body.substring(0, 100000) + '\n... [truncated]'
+          }
+        }
+      }).catch(() => {
+        // Body might not be available
+      })
+    }
+  }
+})
+
+// Clean up when tab is closed or debugger is detached
+chrome.debugger.onDetach.addListener((source, reason) => {
+  debuggerSessions.delete(source.tabId)
+  console.log(`[Debugger] Detached from tab ${source.tabId}: ${reason}`)
+})
 
 // =============================================================================
 // TABS & SCREENSHOTS
@@ -844,6 +1250,16 @@ chrome.commands.onCommand.addListener((command) => {
 
 // Handle messages from content scripts (picker)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'DISCONNECT') {
+    disconnectWebSocket()
+    sendResponse({ success: true })
+    return true
+  }
+  if (message.type === 'RECONNECT') {
+    connectWebSocket()
+    sendResponse({ success: true })
+    return true
+  }
   if (message.type === 'ELEMENT_SELECTED') {
     handleElementSelected(message.element, sender)
     sendResponse({ success: true })

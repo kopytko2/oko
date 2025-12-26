@@ -37,24 +37,6 @@ interface ElementInfo {
 // =============================================================================
 
 /**
- * Execute script in tab and return result
- */
-async function executeInTab<T>(
-  tabId: number,
-  func: () => T
-): Promise<T> {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func
-  })
-  
-  if (results && results[0]) {
-    return results[0].result as T
-  }
-  throw new Error('Script execution returned no result')
-}
-
-/**
  * Execute script with arguments in tab
  */
 async function executeInTabWithArgs<T, A extends unknown[]>(

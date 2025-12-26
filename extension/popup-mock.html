@@ -129,10 +129,6 @@
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: var(--gray-400);
-    }
-
-    .status-dot.connected {
       background: var(--green-500);
     }
 
@@ -226,7 +222,7 @@
     .picker-icon {
       width: 16px;
       height: 16px;
-      opacity: 0.9;
+      opacity: 0.8;
     }
 
     .shortcut {
@@ -454,14 +450,14 @@
     </div>
     <div class="status-pill">
       <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Ready</span>
+      <span id="statusText">Connected</span>
     </div>
   </div>
 
   <!-- Main -->
   <div class="main">
     <!-- Element Picker -->
-    <div class="card" id="connectionCard">
+    <div class="card">
       <div class="card-body">
         <button class="picker-btn" id="pickerBtn">
           <svg class="picker-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -476,7 +472,7 @@
     </div>
 
     <!-- Connection -->
-    <div class="card">
+    <div class="card" id="connectionCard">
       <div class="card-header">
         <span class="card-title">Connection</span>
         <div class="card-actions">
@@ -519,9 +515,102 @@
   <!-- Footer -->
   <div class="footer">
     <span>v0.2.0</span>
-    <a href="https://github.com/nicholasgriffintn/oko" target="_blank">GitHub</a>
+    <a href="https://ona.com/docs" target="_blank">Docs</a>
   </div>
 
-  <script src="popup.js"></script>
+  <script>
+    const testBtn = document.getElementById('testBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const status = document.getElementById('status');
+    const backendUrl = document.getElementById('backendUrl');
+    const authToken = document.getElementById('authToken');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const collapseBtn = document.getElementById('collapseBtn');
+    const connectionBody = document.getElementById('connectionBody');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const connectionCard = document.getElementById('connectionCard');
+
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const shortcutModifier = isMac ? 'option' : 'alt';
+    document.getElementById('shortcutKey').textContent = `${shortcutModifier} + shift + A`;
+
+    function setConnectionCollapsed(collapsed) {
+      connectionBody.classList.toggle('collapsed', collapsed);
+      collapseBtn.textContent = collapsed ? 'Show' : 'Hide';
+    }
+
+    function setDisconnectVisible(visible) {
+      disconnectBtn.classList.toggle('hidden', !visible);
+    }
+
+    function setConnectionState(state, autoCollapse = false) {
+      if (state === 'connected') {
+        statusDot.classList.remove('offline');
+        statusText.textContent = 'Connected';
+        connectionCard.classList.add('connected');
+        setDisconnectVisible(true);
+        if (autoCollapse) setConnectionCollapsed(true);
+        return;
+      }
+
+      statusDot.classList.add('offline');
+      statusText.textContent = 'Offline';
+      connectionCard.classList.remove('connected');
+      setDisconnectVisible(false);
+      if (autoCollapse) setConnectionCollapsed(false);
+    }
+
+    // Collapse
+    collapseBtn.addEventListener('click', () => {
+      const collapsed = !connectionBody.classList.contains('collapsed');
+      setConnectionCollapsed(collapsed);
+    });
+
+    // Enable save on change
+    [backendUrl, authToken].forEach(el => {
+      el.addEventListener('input', () => saveBtn.disabled = false);
+    });
+
+    // Test
+    testBtn.addEventListener('click', () => {
+      status.className = 'status-msg testing visible';
+      status.textContent = '● Testing...';
+      
+      setTimeout(() => {
+        const ok = Math.random() > 0.3;
+        if (ok) {
+          const ms = Math.floor(Math.random() * 80) + 20;
+          status.className = 'status-msg success visible';
+          status.textContent = `✓ Connected (${ms}ms)`;
+          setConnectionState('connected', true);
+        } else {
+          status.className = 'status-msg error visible';
+          status.textContent = '✕ Connection failed';
+          setConnectionState('offline', true);
+        }
+      }, 600);
+    });
+
+    // Save
+    saveBtn.addEventListener('click', () => {
+      status.className = 'status-msg success visible';
+      status.textContent = '✓ Saved';
+      saveBtn.disabled = true;
+    });
+
+    // Picker
+    document.getElementById('pickerBtn').addEventListener('click', () => {
+      alert('Element picker activates on current page');
+    });
+
+    disconnectBtn.addEventListener('click', () => {
+      status.className = 'status-msg error visible';
+      status.textContent = 'Disconnected';
+      setConnectionState('offline', true);
+    });
+
+    setConnectionState('connected', true);
+  </script>
 </body>
 </html>

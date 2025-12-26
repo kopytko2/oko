@@ -18,8 +18,8 @@ interface CapturedRequest {
   startTime: number
   endTime?: number
   durationMs?: number
-  requestHeaders?: Array<{ name: string; value: string }>
-  responseHeaders?: Array<{ name: string; value: string }>
+  requestHeaders?: Array<{ name: string; value?: string }>
+  responseHeaders?: Array<{ name: string; value?: string }>
   statusCode?: number
   statusLine?: string
   fromCache?: boolean
@@ -44,6 +44,9 @@ let captureConfig: CaptureConfig = {
   maxRequests: 1000,
   redactHeaders: ['authorization', 'cookie', 'set-cookie', 'x-auth-token']
 }
+const CAPTURE_TTL_MS = 30 * 60 * 1000
+const CAPTURE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+let lastCleanupTime = 0
 
 // Track listeners to avoid duplicate registration
 let listenersRegistered = false
@@ -56,8 +59,8 @@ let listenersRegistered = false
  * Redact sensitive headers from request/response
  */
 function redactHeaders(
-  headers: Array<{ name: string; value: string }> | undefined
-): Array<{ name: string; value: string }> | undefined {
+  headers: Array<{ name: string; value?: string }> | undefined
+): Array<{ name: string; value?: string }> | undefined {
   if (!headers) return undefined
   
   return headers.map(h => {
@@ -65,8 +68,15 @@ function redactHeaders(
     if (captureConfig.redactHeaders.some(r => nameLower === r.toLowerCase())) {
       return { name: h.name, value: '[REDACTED]' }
     }
-    return h
+    return { name: h.name, value: h.value }
   })
+}
+
+function normalizeTabId(tabId: unknown): number | undefined {
+  if (typeof tabId !== 'number' || !Number.isInteger(tabId) || tabId < 0) {
+    return undefined
+  }
+  return tabId
 }
 
 // =============================================================================
@@ -92,6 +102,23 @@ function matchesUrlFilter(url: string): boolean {
   })
 }
 
+function pruneCapturedRequests(now: number): void {
+  if (capturedRequests.size === 0) return
+  const cutoff = now - CAPTURE_TTL_MS
+  for (const [id, req] of capturedRequests) {
+    if (req.startTime < cutoff) {
+      capturedRequests.delete(id)
+    }
+  }
+}
+
+function maybePruneCapturedRequests(): void {
+  const now = Date.now()
+  if (now - lastCleanupTime < CAPTURE_CLEANUP_INTERVAL_MS) return
+  lastCleanupTime = now
+  pruneCapturedRequests(now)
+}
+
 function onBeforeRequest(
   details: chrome.webRequest.WebRequestBodyDetails
 ): void {
@@ -100,6 +127,8 @@ function onBeforeRequest(
   
   // Apply URL filter at capture time
   if (!matchesUrlFilter(details.url)) return
+
+  maybePruneCapturedRequests()
   
   // Enforce max requests limit
   if (capturedRequests.size >= captureConfig.maxRequests) {
@@ -238,9 +267,10 @@ interface ClearNetworkRequestsMessage {
  * Enable network capture
  */
 export function handleEnableNetworkCapture(message: EnableNetworkCaptureMessage): void {
+  const tabId = normalizeTabId(message.tabId)
   captureConfig = {
     enabled: true,
-    tabId: message.tabId,
+    tabId,
     urlFilter: message.urlFilter,
     maxRequests: message.maxRequests || 1000,
     redactHeaders: message.redactHeaders || ['authorization', 'cookie', 'set-cookie', 'x-auth-token']
@@ -278,11 +308,13 @@ export function handleDisableNetworkCapture(message: { requestId: string }): voi
  * Get captured network requests with filtering and pagination
  */
 export function handleGetNetworkRequests(message: GetNetworkRequestsMessage): void {
+  maybePruneCapturedRequests()
   let requests = Array.from(capturedRequests.values())
   
   // Filter by tab
-  if (message.tabId !== undefined) {
-    requests = requests.filter(r => r.tabId === message.tabId)
+  const tabId = normalizeTabId(message.tabId)
+  if (tabId !== undefined) {
+    requests = requests.filter(r => r.tabId === tabId)
   }
   
   // Filter by type
@@ -320,14 +352,19 @@ export function handleGetNetworkRequests(message: GetNetworkRequestsMessage): vo
   })
 }
 
+setInterval(() => {
+  pruneCapturedRequests(Date.now())
+}, CAPTURE_CLEANUP_INTERVAL_MS)
+
 /**
  * Clear captured network requests
  */
 export function handleClearNetworkRequests(message: ClearNetworkRequestsMessage): void {
-  if (message.tabId !== undefined) {
+  const tabId = normalizeTabId(message.tabId)
+  if (tabId !== undefined) {
     // Clear only for specific tab
     for (const [id, req] of capturedRequests) {
-      if (req.tabId === message.tabId) {
+      if (req.tabId === tabId) {
         capturedRequests.delete(id)
       }
     }

@@ -6,7 +6,7 @@ Add a visual element picker to Oko that lets users select page elements and send
 
 ## User Flow
 
-1. User presses `Alt+Shift+O` (or clicks extension icon menu)
+1. User presses `Alt+Shift+A` (or clicks extension icon menu)
 2. Picker overlay activates - cursor changes, banner appears (idempotent toggle)
 3. User hovers over elements - orange outline highlights current element
 4. Tooltip shows: selector preview, tag name, dimensions
@@ -259,7 +259,7 @@ const REDACTED_ATTRIBUTES = [
 
 | Key | Action |
 |-----|--------|
-| `Alt+Shift+O` | Toggle picker on/off |
+| `Alt+Shift+A` | Toggle picker on/off |
 | `ESC` | Cancel picker |
 | `Enter` | Select currently highlighted element |
 | `Ctrl+Click` / `Cmd+Click` | If same-origin iframe, enter frame to pick inside |
@@ -275,7 +275,7 @@ const REDACTED_ATTRIBUTES = [
   "commands": {
     "toggle-picker": {
       "suggested_key": {
-        "default": "Alt+Shift+O"
+        "default": "Alt+Shift+A"
       },
       "description": "Toggle element picker"
     }
