@@ -224,6 +224,8 @@ function routeWebSocketMessage(message) {
   // Handle browser MCP requests from backend
   if (type === 'browser-list-tabs') {
     handleListTabs(message)
+  } else if (type === 'browser-navigate') {
+    handleNavigate(message)
   } else if (type === 'browser-screenshot') {
     handleScreenshot(message)
   } else if (type === 'browser-get-element-info') {
@@ -828,6 +830,79 @@ async function handleListTabs(message) {
   } catch (err) {
     sendToWebSocket({
       type: 'browser-list-tabs-result',
+      requestId: message.requestId,
+      success: false,
+      error: err.message
+    })
+  }
+}
+
+async function handleNavigate(message) {
+  try {
+    const { url, tabId, newTab, active } = message
+    
+    if (!url) {
+      sendToWebSocket({
+        type: 'browser-navigate-result',
+        requestId: message.requestId,
+        success: false,
+        error: 'url is required'
+      })
+      return
+    }
+
+    // Validate URL
+    try {
+      new URL(url)
+    } catch {
+      sendToWebSocket({
+        type: 'browser-navigate-result',
+        requestId: message.requestId,
+        success: false,
+        error: 'Invalid URL format'
+      })
+      return
+    }
+
+    let tab
+    if (newTab) {
+      // Create new tab
+      tab = await chrome.tabs.create({ 
+        url, 
+        active: active !== false 
+      })
+    } else if (tabId) {
+      // Navigate existing tab
+      tab = await chrome.tabs.update(tabId, { url })
+    } else {
+      // Navigate current active tab
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!activeTab) {
+        sendToWebSocket({
+          type: 'browser-navigate-result',
+          requestId: message.requestId,
+          success: false,
+          error: 'No active tab found'
+        })
+        return
+      }
+      tab = await chrome.tabs.update(activeTab.id, { url })
+    }
+
+    sendToWebSocket({
+      type: 'browser-navigate-result',
+      requestId: message.requestId,
+      success: true,
+      tab: {
+        id: tab.id,
+        url: tab.url || url,
+        title: tab.title,
+        windowId: tab.windowId
+      }
+    })
+  } catch (err) {
+    sendToWebSocket({
+      type: 'browser-navigate-result',
       requestId: message.requestId,
       success: false,
       error: err.message

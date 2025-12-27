@@ -312,6 +312,26 @@ app.get('/api/browser/tabs', async (req, res) => {
   sendToExtension(req, res, 'browser-list-tabs', {})
 })
 
+// Navigate to URL
+app.post('/api/browser/navigate', async (req, res) => {
+  const body = req.body || {}
+  const url = parseString(body.url, 2048)
+  if (!url) {
+    return res.status(400).json({ success: false, error: 'url is required (max 2048 chars)' })
+  }
+
+  const tabId = parseInteger(body.tabId)
+  const newTab = body.newTab === true
+  const active = body.active !== false
+
+  sendToExtension(req, res, 'browser-navigate', {
+    url,
+    tabId: tabId !== null && tabId >= 0 ? tabId : undefined,
+    newTab,
+    active
+  })
+})
+
 // Get selected element for this session (scoped by auth token)
 app.get('/api/browser/selected-element', requireAuth, (req, res) => {
   const key = getSelectionKey(req)
