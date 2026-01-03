@@ -1,115 +1,144 @@
 # Oko
 
-Oko is a Chrome extension + backend that lets you automate and inspect your live browser from a local or remote development environment (Ona/Gitpod). It captures network activity, inspects DOM elements, and triggers browser actions without running a separate browser instance.
+Oko is a Chrome extension + backend that lets you automate and inspect your browser from a development environment. Control tabs, capture network traffic, click elements, fill forms, and take screenshots - all via REST API.
 
-## What this repo contains
+## Features
 
-- `backend/`: Node/Express + WebSocket server that brokers API requests to the extension.
-- `extension/`: MV3 Chrome extension that performs browser actions and reports back.
-- Docs: security notes, QA checklist, and planning docs.
+- **Navigate** - Open URLs in new or existing tabs
+- **Network capture** - Capture requests with headers, or full response bodies via debugger
+- **Element picker** - Select elements visually with `Alt+Shift+O`
+- **Screenshots** - Capture visible area or full page
+- **DOM interaction** - Click elements, fill inputs, get element info
 
-## How it works
+## Quick start
 
-1. The backend runs on port `8129` and exposes REST endpoints.
-2. The extension maintains a WebSocket connection to the backend.
-3. API calls (e.g., screenshot, click, network capture) are forwarded to the extension and returned as responses.
-
-## Quick start (local)
+### 1. Start the backend
 
 ```bash
-# Start backend
 cd backend
 npm install
 npm start
-
-# Build extension
-cd ../extension
-npm install
-npm run build
-
-# Load extension in Chrome
-# 1. Go to chrome://extensions
-# 2. Enable Developer mode
-# 3. Load unpacked -> select extension/ folder
 ```
 
-## Quick start (Ona/Gitpod)
+In Ona/Gitpod environments, the backend outputs the connection config on startup:
+
+```
+============================================================
+  Oko Extension Config (copy/paste into Quick Config):
+============================================================
+URL: https://8129--<env-id>.gitpod.dev
+Token: <generated-token>
+============================================================
+```
+
+### 2. Load the extension
+
+1. Go to `chrome://extensions`
+2. Enable Developer mode
+3. Click "Load unpacked" and select the `extension/` folder
+
+### 3. Connect
+
+Open the Oko extension popup, paste the URL and token, click **Test** then **Save**.
+
+## API Reference
+
+All endpoints require `X-Auth-Token` header for remote connections.
+
+### Tabs & Navigation
 
 ```bash
-# In Ona environment
-export OKO_AUTH_TOKEN=$(openssl rand -hex 32)
-cd backend && npm install && npm start
+# List open tabs
+GET /api/browser/tabs
 
-# Expose port
-gitpod environment port open 8129
+# Navigate to URL
+POST /api/browser/navigate
+{"url": "https://example.com", "newTab": true}
+# or navigate existing tab:
+{"url": "https://example.com", "tabId": 12345}
 ```
 
-Then open the extension popup and set:
-- Backend URL (the public URL from the port open command)
-- Auth token (`OKO_AUTH_TOKEN`)
-- Click Test Connection
-
-## Using it (core workflows)
-
-- Element picker: press `Alt+Shift+A`, click an element, then call `/api/browser/selected-element`.
-- Network capture (headers): `POST /api/browser/network/enable`, then `GET /api/browser/network/requests`.
-- Network capture (with bodies): Use debugger API - see below.
-- Element actions: `POST /api/browser/element-info`, `/api/browser/click`, `/api/browser/fill`.
-- Screenshots: `GET /api/browser/screenshot` (use `fullPage=true` when needed).
-
-## Debugger-based network capture
-
-To capture full response bodies (not just headers), use the debugger API. This attaches Chrome DevTools Protocol to a tab and captures complete request/response data.
+### Element Interaction
 
 ```bash
-# 1. Get tab ID
-curl -H "X-Auth-Token: $TOKEN" "$URL/api/browser/tabs"
+# Get selected element (after user presses Alt+Shift+O)
+GET /api/browser/selected-element
 
-# 2. Enable debugger capture on a tab
-curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
-  "$URL/api/browser/debugger/enable" -d '{"tabId": 12345}'
+# Get element info by selector
+POST /api/browser/element-info
+{"tabId": 12345, "selector": "h1"}
 
-# 3. Browse the page to generate traffic, then fetch captured requests
-curl -H "X-Auth-Token: $TOKEN" \
-  "$URL/api/browser/debugger/requests?tabId=12345&urlPattern=api&limit=20"
+# Click element
+POST /api/browser/click
+{"tabId": 12345, "selector": "button.submit"}
 
-# 4. Disable when done
-curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
-  "$URL/api/browser/debugger/disable" -d '{"tabId": 12345}'
+# Fill input
+POST /api/browser/fill
+{"tabId": 12345, "selector": "input[name=email]", "value": "test@example.com"}
 ```
 
-Note: A yellow banner "Oko is debugging this tab" appears while debugger is attached.
+### Screenshots
 
-## Security highlights
+```bash
+# Capture visible area
+GET /api/browser/screenshot?tabId=12345
 
-- Token-based auth for remote access.
-- Rate limiting (100 req/min).
-- Header redaction for sensitive data.
-- CORS restricted to known origins.
+# Capture full page
+GET /api/browser/screenshot?tabId=12345&fullPage=true
+```
+
+### Network Capture (headers only)
+
+```bash
+# Enable capture
+POST /api/browser/network/enable
+
+# Get captured requests
+GET /api/browser/network/requests?limit=50&urlPattern=api
+
+# Disable capture
+POST /api/browser/network/disable
+```
+
+### Network Capture (with response bodies)
+
+Uses Chrome DevTools Protocol. Shows a yellow "debugging" banner on the tab.
+
+```bash
+# Enable debugger on a tab
+POST /api/browser/debugger/enable
+{"tabId": 12345}
+
+# Get requests with full response bodies
+GET /api/browser/debugger/requests?tabId=12345&urlPattern=api&limit=20
+
+# Disable debugger
+POST /api/browser/debugger/disable
+{"tabId": 12345}
+```
 
 ## Project structure
 
 ```
 Oko/
 ├── backend/
-│   ├── server.js
+│   ├── server.js      # Express + WebSocket server
 │   └── package.json
 ├── extension/
-│   ├── background/
-│   ├── components/
-│   ├── lib/
+│   ├── background.js  # Service worker
+│   ├── picker.js      # Element picker overlay
+│   ├── popup.html/js  # Extension popup UI
 │   └── manifest.json
-├── SECURITY.md
-├── QA_CHECKLIST.md
+├── AGENTS.md          # Notes for AI agents
 └── README.md
 ```
 
-## Docs
+## Security
 
-- [Security](SECURITY.md) - Authentication, rate limiting, data protection
-- [QA Checklist](QA_CHECKLIST.md) - Testing scenarios and verification
-- [Integration Plan](ONA_INTEGRATION_PLAN.md) - Original design document
-- [Tickets](ONA_INTEGRATION_TICKETS.md) - Implementation tickets
+- Token-based authentication for remote access
+- Rate limiting (100 requests/minute)
+- Sensitive headers (Authorization, Cookie) are redacted in captures
+- CORS restricted to localhost and Gitpod origins
 
 ## License
 
