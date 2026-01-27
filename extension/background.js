@@ -63,21 +63,20 @@ let pingIntervalId = null
 let lastPongTime = null
 let manualDisconnect = false
 
-// Queue for element selections when WebSocket is disconnected
+// Element selection queue - holds selections made while WebSocket is disconnected
+// Capped at 10 items to prevent memory bloat if user keeps selecting while offline
+// 5-minute TTL ensures stale selections don't get sent after long disconnections
 const pendingElementSelections = []
 const MAX_QUEUED_SELECTIONS = 10
-const QUEUE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const QUEUE_TTL_MS = 5 * 60 * 1000
 
 function queueElementSelection(element) {
   const now = Date.now()
-  // Remove expired entries
   while (pendingElementSelections.length > 0 && 
          now - pendingElementSelections[0].timestamp > QUEUE_TTL_MS) {
     pendingElementSelections.shift()
   }
-  // Add new selection
   pendingElementSelections.push({ element, timestamp: now })
-  // Trim to max size
   while (pendingElementSelections.length > MAX_QUEUED_SELECTIONS) {
     pendingElementSelections.shift()
   }
@@ -199,7 +198,8 @@ async function connectWebSocket() {
       broadcastToClients({ type: 'WS_CONNECTED' })
       updateBadge(true)
       
-      // Flush any queued element selections
+      // Flush queued selections on reconnect - user may have selected elements while offline
+      // and expects them to be delivered once connection is restored
       const queued = flushElementSelections()
       if (queued.length > 0) {
         console.log(`[Background] Flushing ${queued.length} queued element selections`)

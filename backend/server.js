@@ -103,8 +103,8 @@ app.use(cors(corsOptions))
 
 // Rate limit for browser API endpoints (prevents abuse)
 const browserApiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
+  windowMs: 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -230,7 +230,7 @@ const pendingRequests = new Map()
 
 // Selected elements per session (scoped by auth token)
 const selectedElements = new Map()
-const SELECTION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const SELECTION_TTL_MS = 5 * 60 * 1000
 
 /**
  * Get session ID from auth token (for per-user scoping)
