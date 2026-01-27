@@ -1,0 +1,19 @@
+tasks:
+  install-deps:
+    name: Install Dependencies
+    command: |
+      cd backend && npm ci
+    triggeredBy:
+      - postDevcontainerStart
+
+services:
+  oko-backend:
+    name: Oko Backend
+    description: Browser automation API server
+    commands:
+      start: |
+        cd backend && npm start
+      ready: |
+        curl -s http://localhost:8129/api/health > /dev/null 2>&1
+    triggeredBy:
+      - postDevcontainerStart

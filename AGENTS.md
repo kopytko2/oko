@@ -2,6 +2,40 @@
 
 This repo contains the Oko backend (Node/Express + WebSocket) and the Oko Chrome extension.
 
+## What Oko Does
+
+Oko gives you (the agent) access to the user's browser via REST API. You can:
+- List and control browser tabs
+- Capture network traffic with full request/response bodies
+- Click elements, fill forms, navigate pages
+- Take screenshots
+- Select elements visually (user triggers with Alt+Shift+A)
+
+## IMPORTANT: Getting Connected
+
+Before using any browser APIs, ensure Oko is connected:
+
+1. **Check if backend is running:** `curl http://localhost:8129/api/health`
+2. **If not running:** Start with `gitpod automations service start oko-backend` or `cd backend && npm start`
+3. **Get connection code:** Read from backend logs or generate:
+   ```bash
+   TOKEN=$(cat /tmp/oko-auth-token)
+   URL="https://8129--${GITPOD_ENVIRONMENT_ID}.${GITPOD_REGION:-us-east-1-01}.gitpod.dev"
+   echo "oko:$(echo -n "${URL}|${TOKEN}" | base64 -w 0)"
+   ```
+4. **User must paste code in extension popup** - you cannot do this programmatically
+
+## IMPORTANT: Checking Connection Status
+
+Before making browser API calls, verify the extension is connected:
+```bash
+curl -H "X-Auth-Token: $TOKEN" "http://localhost:8129/api/browser/tabs"
+```
+If you get `503 No extension connected`, ask the user to:
+- Open the Oko extension popup in Chrome
+- Paste the connection code
+- Verify status shows "Connected"
+
 ## Quick setup (for using the extension)
 
 Backend:
@@ -84,3 +118,46 @@ curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
 - Extension build: `npm run build`
 - Extension typecheck: `npm run typecheck`
 - Extension lint: `npm run lint`
+
+## Common Tasks
+
+### Capture API traffic from a website
+1. Get tab ID: `GET /api/browser/tabs` - find the target tab
+2. Enable debugger: `POST /api/browser/debugger/enable` with `{"tabId": <id>}`
+3. Ask user to interact with the website
+4. Fetch requests: `GET /api/browser/debugger/requests?tabId=<id>&urlPattern=api&limit=100`
+5. Disable debugger: `POST /api/browser/debugger/disable` with `{"tabId": <id>}`
+
+### Take a screenshot
+```bash
+curl -H "X-Auth-Token: $TOKEN" "http://localhost:8129/api/browser/screenshot?tabId=<id>&fullPage=true"
+```
+Response contains base64-encoded PNG.
+
+### Click an element
+```bash
+curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
+  "http://localhost:8129/api/browser/click" -d '{"tabId": <id>, "selector": "button.submit"}'
+```
+
+### Fill a form field
+```bash
+curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
+  "http://localhost:8129/api/browser/fill" -d '{"tabId": <id>, "selector": "input[name=email]", "value": "test@example.com"}'
+```
+
+## Error Handling
+
+| Error | Meaning | Solution |
+|-------|---------|----------|
+| 503 "No extension connected" | Extension not connected to backend | Ask user to open popup and paste connection code |
+| 504 "Extension timeout" | Extension didn't respond | Extension may be suspended; ask user to interact with browser |
+| 401 "Unauthorized" | Invalid or missing token | Check token matches `/tmp/oko-auth-token` |
+| "No debugger session" | Debugger not enabled for tab | Call `/api/browser/debugger/enable` first |
+
+## Anti-patterns
+
+- **DON'T** assume the extension is connected - always check first
+- **DON'T** try to automate extension setup - user must paste connection code manually
+- **DON'T** forget to disable debugger when done - it shows a yellow banner to the user
+- **DON'T** use localhost URLs when telling user about the backend - use the Gitpod URL
