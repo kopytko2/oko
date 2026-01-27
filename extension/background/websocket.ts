@@ -106,14 +106,22 @@ function stopPing(): void {
  * Send message to WebSocket
  */
 export function sendToWebSocket(data: unknown): void {
+  // Reset manualDisconnect if connection is open (handles race condition with storage change events)
+  if (ws?.readyState === WebSocket.OPEN && manualDisconnect) {
+    manualDisconnect = false
+  }
+  
   if (manualDisconnect) return
+  
   if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data))
+    try {
+      ws.send(JSON.stringify(data))
+    } catch (err) {
+      log.error('Failed to send to WebSocket', err instanceof Error ? err : undefined)
+    }
   } else {
     log.error('WebSocket not connected', undefined, { state: ws?.readyState })
-    // Try to reconnect if not connected
     if (!ws || ws.readyState === WebSocket.CLOSED) {
-      log.info('Attempting to reconnect WebSocket')
       connectWebSocket()
     }
   }
@@ -149,7 +157,14 @@ export async function connectWebSocket(): Promise<void> {
   }
 
   const connectAttempt = (async () => {
-    const connection = await getConnection()
+    let connection
+    try {
+      connection = await getConnection()
+    } catch (err) {
+      // No URL configured yet - wait for user to paste connection code
+      log.info('No backend URL configured')
+      return
+    }
     const wsUrl = connection.wsUrl
 
     // Fetch fresh token from backend, fall back to stored token
@@ -331,7 +346,7 @@ async function routeWebSocketMessage(message: ValidMessage): Promise<void> {
   }
 
   // Browser MCP requests - handle and respond
-  if (type?.startsWith('browser-')) {
+  if (type.startsWith('browser-')) {
     await handleBrowserRequest(type, message)
     return
   }

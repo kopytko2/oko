@@ -36,8 +36,13 @@ async function init(): Promise<void> {
     }
   })
   
-  // Connect to backend
-  connectWebSocket()
+  // Only auto-connect if URL is already configured
+  const settings = await chrome.storage.sync.get(['backendUrl'])
+  if (settings.backendUrl) {
+    connectWebSocket()
+  } else {
+    log.info('No backend URL configured, waiting for connection code')
+  }
 }
 
 // Handle extension page connections
