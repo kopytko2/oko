@@ -14,19 +14,18 @@ export interface ResolvedConnection {
   authToken: string
 }
 
-const DEFAULT_BACKEND_URL = 'http://localhost:8129'
-
 /**
  * Normalize and validate a backend URL
  * - Auto-prepends https:// if no scheme provided
  * - Strips trailing slashes
  * - Validates URL format
+ * - Returns empty string if no URL configured (requires connection code)
  */
 function normalizeUrl(url: string): string {
   let normalized = url.trim()
   
   if (!normalized) {
-    return DEFAULT_BACKEND_URL
+    return ''
   }
   
   // Auto-prepend https:// if no scheme
@@ -58,7 +57,10 @@ export async function getConnectionSettings(): Promise<ResolvedConnection> {
     chrome.storage.local.get(['authToken'])
   ])
   
-  const backendUrl = normalizeUrl(syncData.backendUrl || DEFAULT_BACKEND_URL)
+  const backendUrl = normalizeUrl(syncData.backendUrl || '')
+  if (!backendUrl) {
+    throw new Error('No backend URL configured. Paste a connection code in the extension popup.')
+  }
   const url = new URL(backendUrl)
   
   // Derive WebSocket URL from HTTP URL

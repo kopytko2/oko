@@ -12,11 +12,42 @@ import {
   broadcastToClients, flushElementSelections
 } from './state'
 import { getConnection, buildUrl } from '../lib/api'
+import {
+  handleGetElementInfo,
+  handleClickElement,
+  handleFillInput
+} from './browserMcp/elements'
+import {
+  handleEnableNetworkCapture,
+  handleDisableNetworkCapture,
+  handleGetNetworkRequests,
+  handleClearNetworkRequests
+} from './browserMcp/network'
+import {
+  handleEnableDebuggerCapture,
+  handleDisableDebuggerCapture,
+  handleGetDebuggerRequests,
+  handleClearDebuggerRequests
+} from './browserMcp/debugger'
 
 const log = createLogger('WebSocket')
 
-// Alarm name for reconnection
 const ALARM_WS_RECONNECT = 'ws-reconnect'
+
+interface ValidMessage {
+  type: string
+  requestId?: string
+  [key: string]: unknown
+}
+
+function isValidMessage(msg: unknown): msg is ValidMessage {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'type' in msg &&
+    typeof (msg as Record<string, unknown>).type === 'string'
+  )
+}
 
 // Forward declaration for reconnect scheduler
 let scheduleReconnectFn: (() => void) | null = null
@@ -98,34 +129,30 @@ export async function connectWebSocket(): Promise<void> {
 
   manualDisconnect = false
 
-  // Already connected
   if (ws?.readyState === WebSocket.OPEN) {
     log.debug('WebSocket already connected')
     return
   }
 
-  // Already connecting
   if (ws?.readyState === WebSocket.CONNECTING) {
     log.debug('WebSocket already connecting')
     return
   }
 
-  // Close any existing connection
   if (ws) {
     try {
       ws.close()
     } catch {
-      // Ignore errors when closing
+      // close() can throw if socket is in weird state
     }
     setWs(null)
   }
 
   const connectAttempt = (async () => {
-    // Get connection settings
     const connection = await getConnection()
     const wsUrl = connection.wsUrl
 
-    // Get auth token for first-message auth
+    // Fetch fresh token from backend, fall back to stored token
     let authToken: string | null = null
     try {
       const tokenUrl = buildUrl(connection.apiUrl, '/api/auth/token')
@@ -146,7 +173,6 @@ export async function connectWebSocket(): Promise<void> {
       log.warn('Failed to fetch token from backend', { error: err instanceof Error ? err.message : String(err) })
     }
     
-    // Fall back to configured auth token
     if (!authToken && connection.authToken) {
       authToken = connection.authToken
       log.debug('Using configured auth token')
@@ -158,38 +184,45 @@ export async function connectWebSocket(): Promise<void> {
     setWs(newWs)
 
     newWs.onopen = () => {
+      // Guard against stale socket callbacks after reconnect
       if (ws !== newWs) {
-        try {
-          newWs.close()
-        } catch {
-          // Ignore close errors for stale sockets.
-        }
+        try { newWs.close() } catch { /* ignore */ }
         return
       }
 
       log.info('WebSocket connected, authenticating')
       
-      // Send auth message first (token not in URL for security)
+      // Token sent in first message, not URL, to avoid logging in server/proxy logs
       if (authToken) {
         newWs.send(JSON.stringify({ type: 'auth', token: authToken }))
-      } else {
-        // Localhost without token - server will auto-authenticate
+      } else if (wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1')) {
+        // Localhost connections auto-authenticate on server side
         onAuthSuccess(newWs)
+      } else {
+        log.error('No auth token available for remote connection')
+        newWs.close(4001, 'No auth token')
+        return
       }
     }
     
     newWs.onmessage = (event) => {
       if (ws !== newWs) return
       try {
-        const message = JSON.parse(event.data)
+        const message = JSON.parse(event.data) as unknown
         
-        // Handle auth response
+        if (!isValidMessage(message)) {
+          log.warn('Invalid message format', { data: typeof event.data })
+          return
+        }
+        
         if (message.type === 'auth-success') {
           onAuthSuccess(newWs)
           return
         }
         
-        routeWebSocketMessage(message)
+        routeWebSocketMessage(message).catch(err => {
+          log.error('Message handler failed', err instanceof Error ? err : undefined, { type: message.type })
+        })
       } catch (err) {
         log.error('Failed to parse WebSocket message', err instanceof Error ? err : undefined)
       }
@@ -201,11 +234,10 @@ export async function connectWebSocket(): Promise<void> {
       chrome.alarms.clear(ALARM_WS_RECONNECT)
       startPing()
 
-      // Identify as extension client
       socket.send(JSON.stringify({ type: 'identify', clientType: 'extension' }))
       broadcastToClients({ type: 'WS_CONNECTED' })
       
-      // Flush any queued element selections
+      // Send any element selections that were queued while disconnected
       const queued = flushElementSelections()
       if (queued.length > 0) {
         log.info('Flushing queued element selections', { count: queued.length })
@@ -214,7 +246,6 @@ export async function connectWebSocket(): Promise<void> {
         }
       }
       
-      // Update badge to show connected
       updateBadge(true)
     }
 
@@ -225,6 +256,7 @@ export async function connectWebSocket(): Promise<void> {
 
     newWs.onclose = (event) => {
       if (ws !== newWs) return
+      
       const codeDescriptions: Record<number, string> = {
         1000: 'Normal closure',
         1001: 'Going away',
@@ -243,11 +275,8 @@ export async function connectWebSocket(): Promise<void> {
       stopPing()
       connectionState.setDisconnected(closeReason)
       broadcastToClients({ type: 'WS_DISCONNECTED' })
-      
-      // Update badge to show disconnected
       updateBadge(false)
 
-      // Schedule reconnection
       if (!manualDisconnect && scheduleReconnectFn && connectionState.canReconnect(DEFAULT_RETRY_CONFIG.maxAttempts)) {
         scheduleReconnectFn()
       }
@@ -280,8 +309,8 @@ export function disconnectWebSocket(): void {
 /**
  * Route incoming WebSocket messages to appropriate handlers
  */
-function routeWebSocketMessage(message: Record<string, unknown>): void {
-  const type = message.type as string
+async function routeWebSocketMessage(message: ValidMessage): Promise<void> {
+  const { type } = message
 
   // Browser MCP responses - forward to clients
   if (type?.startsWith('browser-') && type.endsWith('-result')) {
@@ -301,11 +330,183 @@ function routeWebSocketMessage(message: Record<string, unknown>): void {
     return
   }
 
+  // Browser MCP requests - handle and respond
+  if (type?.startsWith('browser-')) {
+    await handleBrowserRequest(type, message)
+    return
+  }
+
   // Forward other messages as generic WS_MESSAGE
   broadcastToClients({
     type: 'WS_MESSAGE',
     data: message
   })
+}
+
+/**
+ * Handle browser automation requests from backend
+ */
+async function handleBrowserRequest(type: string, message: ValidMessage): Promise<void> {
+  const requestId = message.requestId
+  
+  if (!requestId || typeof requestId !== 'string') {
+    log.error('Browser request missing requestId', undefined, { type })
+    return
+  }
+  
+  try {
+    switch (type) {
+      // Tab management
+      case 'browser-list-tabs': {
+        const tabs = await chrome.tabs.query({})
+        sendToWebSocket({
+          type: 'browser-list-tabs-result',
+          requestId,
+          success: true,
+          tabs: tabs.map(t => ({
+            id: t.id,
+            url: t.url,
+            title: t.title,
+            active: t.active,
+            windowId: t.windowId,
+            index: t.index
+          }))
+        })
+        break
+      }
+      
+      case 'browser-navigate': {
+        const url = message.url as string
+        const tabId = message.tabId as number | undefined
+        const newTab = message.newTab as boolean | undefined
+        const active = message.active as boolean ?? true
+        
+        let tab: chrome.tabs.Tab
+        if (newTab) {
+          tab = await chrome.tabs.create({ url, active })
+        } else if (tabId) {
+          tab = await chrome.tabs.update(tabId, { url, active })
+        } else {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+          if (activeTab?.id) {
+            tab = await chrome.tabs.update(activeTab.id, { url })
+          } else {
+            tab = await chrome.tabs.create({ url, active })
+          }
+        }
+        
+        sendToWebSocket({
+          type: 'browser-navigate-result',
+          requestId,
+          success: true,
+          tab: { id: tab.id, url: tab.url, title: tab.title }
+        })
+        break
+      }
+      
+      case 'browser-screenshot': {
+        const tabId = message.tabId as number | undefined
+        const fullPage = message.fullPage as boolean | undefined
+        
+        let targetTabId = tabId
+        if (!targetTabId) {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+          targetTabId = activeTab?.id
+        }
+        
+        if (!targetTabId) {
+          throw new Error('No tab available for screenshot')
+        }
+        
+        // For full page, we'd need to scroll and stitch - for now just capture visible
+        const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' })
+        
+        sendToWebSocket({
+          type: 'browser-screenshot-result',
+          requestId,
+          success: true,
+          screenshot: dataUrl,
+          fullPage: fullPage ?? false
+        })
+        break
+      }
+      
+      // Element operations (delegated to browserMcp/elements.ts)
+      case 'browser-get-element-info': {
+        await handleGetElementInfo(message as unknown as Parameters<typeof handleGetElementInfo>[0])
+        break
+      }
+      
+      case 'browser-click-element': {
+        await handleClickElement(message as unknown as Parameters<typeof handleClickElement>[0])
+        break
+      }
+      
+      case 'browser-fill-input': {
+        await handleFillInput(message as unknown as Parameters<typeof handleFillInput>[0])
+        break
+      }
+      
+      // Network capture (delegated to browserMcp/network.ts)
+      case 'browser-enable-network-capture': {
+        handleEnableNetworkCapture(message as unknown as Parameters<typeof handleEnableNetworkCapture>[0])
+        break
+      }
+      
+      case 'browser-disable-network-capture': {
+        handleDisableNetworkCapture(message as unknown as Parameters<typeof handleDisableNetworkCapture>[0])
+        break
+      }
+      
+      case 'browser-get-network-requests': {
+        handleGetNetworkRequests(message as unknown as Parameters<typeof handleGetNetworkRequests>[0])
+        break
+      }
+      
+      case 'browser-clear-network-requests': {
+        handleClearNetworkRequests(message as unknown as Parameters<typeof handleClearNetworkRequests>[0])
+        break
+      }
+      
+      // Debugger-based capture (delegated to browserMcp/debugger.ts)
+      case 'browser-enable-debugger-capture': {
+        await handleEnableDebuggerCapture(message as unknown as Parameters<typeof handleEnableDebuggerCapture>[0])
+        break
+      }
+      
+      case 'browser-disable-debugger-capture': {
+        await handleDisableDebuggerCapture(message as unknown as Parameters<typeof handleDisableDebuggerCapture>[0])
+        break
+      }
+      
+      case 'browser-get-debugger-requests': {
+        handleGetDebuggerRequests(message as unknown as Parameters<typeof handleGetDebuggerRequests>[0])
+        break
+      }
+      
+      case 'browser-clear-debugger-requests': {
+        handleClearDebuggerRequests(message as unknown as Parameters<typeof handleClearDebuggerRequests>[0])
+        break
+      }
+      
+      default:
+        log.warn('Unhandled browser request type', { type })
+        sendToWebSocket({
+          type: `${type}-result`,
+          requestId,
+          success: false,
+          error: `Unknown request type: ${type}`
+        })
+    }
+  } catch (err) {
+    log.error('Browser request failed', err instanceof Error ? err : undefined, { type })
+    sendToWebSocket({
+      type: `${type}-result`,
+      requestId,
+      success: false,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
 }
 
 /**

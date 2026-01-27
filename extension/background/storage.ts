@@ -24,7 +24,7 @@ export interface StorageSchema {
 // Default values
 const DEFAULTS: { sync: StorageSchema['sync']; local: StorageSchema['local'] } = {
   sync: {
-    backendUrl: 'http://localhost:8129'
+    backendUrl: ''
   },
   local: {
     authToken: ''
