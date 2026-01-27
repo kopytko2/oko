@@ -3,8 +3,8 @@
  * Entry point for the extension's background processes
  */
 
-import { connectedClients, ws } from './state'
-import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms } from './websocket'
+import { connectedClients, ws, queueElementSelection } from './state'
+import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms, sendToWebSocket } from './websocket'
 import { initCacheListener } from '../lib/api'
 
 // Initialize on service worker start
@@ -34,7 +34,7 @@ chrome.runtime.onConnect.addListener((port) => {
   })
 })
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const type = message?.type as string | undefined
   if (type === 'DISCONNECT') {
     disconnectWebSocket()
@@ -43,6 +43,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (type === 'RECONNECT') {
     connectWebSocket()
+    sendResponse({ success: true })
+    return true
+  }
+  if (type === 'GET_WS_STATUS') {
+    sendResponse({ connected: ws?.readyState === WebSocket.OPEN })
+    return true
+  }
+  if (type === 'ELEMENT_SELECTED') {
+    const element = message.element as Record<string, unknown>
+    element.tabId = sender.tab?.id
+    
+    if (ws?.readyState === WebSocket.OPEN) {
+      sendToWebSocket({ type: 'element-selected', element })
+    } else {
+      // Queue for later when connection is restored
+      queueElementSelection(element)
+      // Try to reconnect
+      connectWebSocket()
+    }
     sendResponse({ success: true })
     return true
   }

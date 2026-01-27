@@ -6,7 +6,7 @@
 import {
   ws, setWs, wsReconnectAttempts, setWsReconnectAttempts, incrementWsReconnectAttempts,
   MAX_RECONNECT_ATTEMPTS, ALARM_WS_RECONNECT,
-  broadcastToClients
+  broadcastToClients, flushElementSelections
 } from './state'
 import { getConnection, buildUrl } from '../lib/api'
 
@@ -16,6 +16,19 @@ let connectInFlight: Promise<void> | null = null
 const PING_INTERVAL_MS = 30000
 let pingIntervalId: ReturnType<typeof setInterval> | null = null
 let manualDisconnect = false
+
+/**
+ * Update extension badge to show connection state
+ */
+function updateBadge(connected: boolean): void {
+  if (connected) {
+    chrome.action.setBadgeText({ text: '' })
+    chrome.action.setBadgeBackgroundColor({ color: '#069F00' })
+  } else {
+    chrome.action.setBadgeText({ text: '!' })
+    chrome.action.setBadgeBackgroundColor({ color: '#E90007' })
+  }
+}
 
 export function setScheduleReconnect(fn: () => void): void {
   scheduleReconnectFn = fn
@@ -140,6 +153,18 @@ export async function connectWebSocket(): Promise<void> {
       // Identify as extension client
       sendToWebSocket({ type: 'identify', clientType: 'extension' })
       broadcastToClients({ type: 'WS_CONNECTED' })
+      
+      // Flush any queued element selections
+      const queued = flushElementSelections()
+      if (queued.length > 0) {
+        console.log(`[Background] Flushing ${queued.length} queued element selections`)
+        for (const item of queued) {
+          sendToWebSocket({ type: 'element-selected', element: item.element })
+        }
+      }
+      
+      // Update badge to show connected
+      updateBadge(true)
     }
 
     newWs.onmessage = (event) => {
@@ -174,6 +199,9 @@ export async function connectWebSocket(): Promise<void> {
       setWs(null)
       stopPing()
       broadcastToClients({ type: 'WS_DISCONNECTED' })
+      
+      // Update badge to show disconnected
+      updateBadge(false)
 
       // Schedule reconnection
       if (!manualDisconnect && scheduleReconnectFn && wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {

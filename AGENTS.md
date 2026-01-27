@@ -19,10 +19,21 @@ Extension:
 
 ## Using the extension
 
-- Open the Oko popup from the toolbar.
-- Set the backend URL (localhost or the Gitpod/Ona public URL).
-- Set the auth token (from `/tmp/oko-auth-token` or `OKO_AUTH_TOKEN`).
-- Click Test Connection; it should report success.
+**Quick connect (recommended):**
+1. Start the backend - it outputs a connection code like `oko:aHR0cHM6...`
+2. Open the Oko popup from the toolbar
+3. Paste the connection code into the "Connection Code" field
+4. The extension auto-saves and connects
+
+**Manual setup:**
+- Open the Oko popup from the toolbar
+- Set the backend URL (localhost or the Gitpod/Ona public URL)
+- Set the auth token (from `/tmp/oko-auth-token` or `OKO_AUTH_TOKEN`)
+- Click Save, then Test Connection
+
+**Local development:**
+- The extension auto-detects `localhost:8129` when no remote URL is configured
+- No auth token needed for localhost
 
 ### Core workflows
 

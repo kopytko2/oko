@@ -689,6 +689,15 @@ function broadcastToType(type, message) {
 // START SERVER
 // =============================================================================
 
+/**
+ * Generate connection code for easy copy/paste setup
+ * Format: oko:BASE64(url|token)
+ */
+function generateConnectionCode(url, token) {
+  const payload = `${url}|${token}`
+  return `oko:${Buffer.from(payload).toString('base64')}`
+}
+
 server.listen(PORT, () => {
   console.log(`[Server] Oko backend listening on port ${PORT}`)
   
@@ -698,16 +707,18 @@ server.listen(PORT, () => {
     // Running in Ona environment - output the remote URL config
     const region = process.env.GITPOD_REGION || 'us-east-1-01'
     const backendUrl = `https://${PORT}--${gitpodEnvId}.${region}.gitpod.dev`
+    const connectionCode = generateConnectionCode(backendUrl, WS_AUTH_TOKEN)
     console.log('')
     console.log('='.repeat(60))
-    console.log('  Oko Extension Config (copy/paste into Quick Config):')
+    console.log('  Oko Extension - paste this code in the extension popup:')
     console.log('='.repeat(60))
-    console.log(`URL: ${backendUrl}`)
-    console.log(`Token: ${WS_AUTH_TOKEN}`)
+    console.log('')
+    console.log(`  ${connectionCode}`)
+    console.log('')
     console.log('='.repeat(60))
     console.log('')
   } else {
-    // Local development
+    // Local development - no code needed, extension auto-detects localhost
     console.log(`[Server] Health check: http://localhost:${PORT}/api/health`)
     console.log('[Server] Local mode (no auth required for localhost)')
   }

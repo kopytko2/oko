@@ -63,6 +63,43 @@ let pingIntervalId = null
 let lastPongTime = null
 let manualDisconnect = false
 
+// Queue for element selections when WebSocket is disconnected
+const pendingElementSelections = []
+const MAX_QUEUED_SELECTIONS = 10
+const QUEUE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+function queueElementSelection(element) {
+  const now = Date.now()
+  // Remove expired entries
+  while (pendingElementSelections.length > 0 && 
+         now - pendingElementSelections[0].timestamp > QUEUE_TTL_MS) {
+    pendingElementSelections.shift()
+  }
+  // Add new selection
+  pendingElementSelections.push({ element, timestamp: now })
+  // Trim to max size
+  while (pendingElementSelections.length > MAX_QUEUED_SELECTIONS) {
+    pendingElementSelections.shift()
+  }
+  console.log(`[Background] Queued element selection (${pendingElementSelections.length} pending)`)
+}
+
+function flushElementSelections() {
+  const items = [...pendingElementSelections]
+  pendingElementSelections.length = 0
+  return items
+}
+
+function updateBadge(connected) {
+  if (connected) {
+    chrome.action.setBadgeText({ text: '' })
+    chrome.action.setBadgeBackgroundColor({ color: '#069F00' })
+  } else {
+    chrome.action.setBadgeText({ text: '!' })
+    chrome.action.setBadgeBackgroundColor({ color: '#E90007' })
+  }
+}
+
 function startPing() {
   if (pingIntervalId !== null) return
   pingIntervalId = setInterval(() => {
@@ -160,6 +197,16 @@ async function connectWebSocket() {
       startPing()
       sendToWebSocket({ type: 'identify', clientType: 'extension' })
       broadcastToClients({ type: 'WS_CONNECTED' })
+      updateBadge(true)
+      
+      // Flush any queued element selections
+      const queued = flushElementSelections()
+      if (queued.length > 0) {
+        console.log(`[Background] Flushing ${queued.length} queued element selections`)
+        for (const item of queued) {
+          sendToWebSocket({ type: 'element-selected', element: item.element })
+        }
+      }
     }
 
     newWs.onmessage = (event) => {
@@ -188,6 +235,7 @@ async function connectWebSocket() {
       ws = null
       stopPing()
       broadcastToClients({ type: 'WS_DISCONNECTED' })
+      updateBadge(false)
       
       if (!manualDisconnect && wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         scheduleReconnect()
@@ -1246,22 +1294,6 @@ async function injectPicker() {
   }
 }
 
-/**
- * Handle element selection from picker
- */
-function handleElementSelected(element, sender) {
-  console.log('[Background] Element selected:', element.selector)
-  
-  // Add tab info
-  element.tabId = sender.tab?.id
-  
-  // Send to backend via WebSocket
-  sendToWebSocket({
-    type: 'element-selected',
-    element
-  })
-}
-
 // =============================================================================
 // INITIALIZATION
 // =============================================================================
@@ -1323,7 +1355,7 @@ chrome.commands.onCommand.addListener((command) => {
   }
 })
 
-// Handle messages from content scripts (picker)
+// Handle messages from content scripts (picker) and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'DISCONNECT') {
     disconnectWebSocket()
@@ -1335,15 +1367,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true })
     return true
   }
+  if (message.type === 'GET_WS_STATUS') {
+    sendResponse({ connected: ws?.readyState === WebSocket.OPEN })
+    return true
+  }
   if (message.type === 'ELEMENT_SELECTED') {
-    handleElementSelected(message.element, sender)
+    const element = message.element
+    element.tabId = sender.tab?.id
+    
+    if (ws?.readyState === WebSocket.OPEN) {
+      sendToWebSocket({ type: 'element-selected', element })
+    } else {
+      // Queue for later when connection is restored
+      queueElementSelection(element)
+      // Try to reconnect
+      connectWebSocket()
+    }
     sendResponse({ success: true })
+    return true
   }
   return true // Keep channel open for async response
 })
 
 // Keep service worker alive
 chrome.alarms.create('keepalive', { periodInMinutes: 1 })
+
+// Set initial badge state (disconnected)
+updateBadge(false)
 
 // Connect to backend
 connectWebSocket()
