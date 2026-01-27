@@ -20,6 +20,14 @@ const WS_AUTH_TOKEN_FILE = '/tmp/oko-auth-token'
 
 // Auth token: use environment variable for remote, generate random for local
 const WS_AUTH_TOKEN = process.env.OKO_AUTH_TOKEN || crypto.randomBytes(32).toString('hex')
+
+// Token expiry: 24 hours from server start (configurable via env)
+const TOKEN_EXPIRY_MS = parseInt(process.env.OKO_TOKEN_EXPIRY_HOURS || '24', 10) * 60 * 60 * 1000
+const TOKEN_CREATED_AT = Date.now()
+
+function isTokenExpired() {
+  return Date.now() - TOKEN_CREATED_AT > TOKEN_EXPIRY_MS
+}
 const EXTENSION_REQUEST_TIMEOUT_MS = 10000
 const EXTENSION_FULL_PAGE_TIMEOUT_MS = 30000
 
@@ -133,20 +141,33 @@ function validateToken(req) {
   
   // For localhost, allow unauthenticated requests if no env token is set
   if (!process.env.OKO_AUTH_TOKEN && isLocalRequest(req)) {
-    return true
+    return { valid: true }
   }
   
-  return token === WS_AUTH_TOKEN
+  if (token !== WS_AUTH_TOKEN) {
+    return { valid: false, reason: 'invalid' }
+  }
+  
+  if (isTokenExpired()) {
+    return { valid: false, reason: 'expired' }
+  }
+  
+  return { valid: true }
 }
 
 /**
  * Auth middleware for protected routes
  */
 function requireAuth(req, res, next) {
-  if (!validateToken(req)) {
+  const result = validateToken(req)
+  if (!result.valid) {
+    const message = result.reason === 'expired' 
+      ? 'Token expired. Restart the backend to generate a new token.'
+      : 'Invalid or missing auth token'
     return res.status(401).json({
       error: 'Unauthorized',
-      message: 'Invalid or missing auth token'
+      message,
+      reason: result.reason
     })
   }
   next()
@@ -161,10 +182,15 @@ function requireAuth(req, res, next) {
  * Used by extension to test connectivity
  */
 app.get('/api/health', (req, res) => {
+  const tokenExpiresAt = TOKEN_CREATED_AT + TOKEN_EXPIRY_MS
+  const tokenExpiresIn = Math.max(0, tokenExpiresAt - Date.now())
+  
   res.json({
-    status: 'ok',
+    status: isTokenExpired() ? 'token_expired' : 'ok',
     timestamp: Date.now(),
-    version: '0.1.0'
+    version: '0.1.0',
+    tokenExpiresIn: Math.floor(tokenExpiresIn / 1000),
+    tokenExpiresAt: new Date(tokenExpiresAt).toISOString()
   })
 })
 
@@ -180,10 +206,12 @@ app.get('/api/auth/token', (req, res) => {
   }
   
   // For remote, require auth header
-  if (!validateToken(req)) {
+  const result = validateToken(req)
+  if (!result.valid) {
     return res.status(401).json({
       error: 'Unauthorized',
-      message: 'Auth token required for remote access'
+      message: 'Auth token required for remote access',
+      reason: result.reason
     })
   }
   
@@ -448,8 +476,13 @@ app.post('/api/browser/debugger/enable', async (req, res) => {
     return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
   }
 
-  const urlFilter = Array.isArray(body.urlFilter) ? body.urlFilter : undefined
+  // urlFilter: array of URL patterns to capture (regex supported)
+  // If not specified, captures ALL requests from the tab
+  const urlFilter = Array.isArray(body.urlFilter) ? body.urlFilter 
+    : Array.isArray(body.domainFilter) ? body.domainFilter 
+    : undefined
   const maxRequests = parseInteger(body.maxRequests) || 500
+  // captureBody: set to false to capture headers only (safer for sensitive sites)
   const captureBody = body.captureBody !== false
 
   sendToExtension(req, res, 'browser-enable-debugger-capture', {

@@ -135,10 +135,44 @@ Oko/
 
 ## Security
 
-- Token-based authentication for remote access
-- Rate limiting (100 requests/minute)
-- Sensitive headers (Authorization, Cookie) are redacted in captures
+### Authentication
+- **Token-based auth** required for all remote connections
+- Tokens are 256-bit cryptographically random
+- **Tokens expire after 24 hours** (configurable via `OKO_TOKEN_EXPIRY_HOURS`)
+- Token file written with mode 600 (owner-only read)
+- Localhost connections don't require auth (for local development)
+
+### Data Protection
+- Sensitive headers (Authorization, Cookie, Set-Cookie) are **redacted by default**
+- Response bodies can contain sensitive data - use `redactHeaders` option to add custom patterns
+- Network capture requires explicit opt-in via debugger API
+- Captured data is held in memory only, not persisted
+
+### Network Security
+- Rate limiting: 100 requests/minute per IP
 - CORS restricted to localhost and Gitpod origins
+- WebSocket connections require valid token
+
+### Extension Permissions
+The Chrome extension requires broad permissions to function:
+- `<all_urls>` - Required to capture network traffic and interact with any page
+- `debugger` - Required for response body capture
+- `tabs`, `scripting` - Required for tab control and element interaction
+
+### Security Considerations
+
+**Connection codes contain the auth token** - treat them as secrets. Don't paste in public channels.
+
+**Network capture sees all traffic** - when debugger is enabled, ALL requests from that tab are captured, including to other domains. The yellow "debugging" banner indicates capture is active.
+
+**Response bodies may contain sensitive data** - PII, tokens, financial data in API responses will be captured. Use domain filtering or disable body capture for sensitive sites.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OKO_AUTH_TOKEN` | Fixed auth token (for production) | Random per-start |
+| `OKO_TOKEN_EXPIRY_HOURS` | Token validity period | 24 |
 
 ## FAQ
 

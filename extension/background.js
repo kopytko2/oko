@@ -335,7 +335,19 @@ const capturedRequests = new Map()
 let captureConfig = {
   enabled: false,
   maxRequests: 1000,
-  redactHeaders: ['authorization', 'cookie', 'set-cookie', 'x-auth-token']
+  redactHeaders: ['authorization', 'cookie', 'set-cookie', 'x-auth-token'],
+  redactBodyPatterns: [
+    /("password"\s*:\s*")[^"]*(")/gi,
+    /("secret"\s*:\s*")[^"]*(")/gi,
+    /("token"\s*:\s*")[^"]*(")/gi,
+    /("api_key"\s*:\s*")[^"]*(")/gi,
+    /("apikey"\s*:\s*")[^"]*(")/gi,
+    /("access_token"\s*:\s*")[^"]*(")/gi,
+    /("refresh_token"\s*:\s*")[^"]*(")/gi,
+    /("private_key"\s*:\s*")[^"]*(")/gi,
+    /(Bearer\s+)[A-Za-z0-9\-_]+\.?[A-Za-z0-9\-_]*\.?[A-Za-z0-9\-_]*/gi,
+    /(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z]{2,}\b)/gi
+  ]
 }
 const CAPTURE_TTL_MS = 30 * 60 * 1000
 const CAPTURE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
@@ -351,6 +363,19 @@ function redactHeaders(headers) {
     }
     return h
   })
+}
+
+function redactBody(body) {
+  if (!body || typeof body !== 'string') return body
+  let redacted = body
+  for (const pattern of captureConfig.redactBodyPatterns) {
+    redacted = redacted.replace(pattern, (match, p1, p2) => {
+      if (p2) return p1 + '[REDACTED]' + p2
+      if (p1) return p1 + '[REDACTED]'
+      return '[REDACTED]'
+    })
+  }
+  return redacted
 }
 
 function normalizeTabId(tabId) {
@@ -803,7 +828,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       url: request.url,
       method: request.method,
       headers: request.headers,
-      postData: request.postData,
+      postData: redactBody(request.postData),
       type: type || 'Other',
       timestamp: timestamp * 1000,
       tabId
@@ -832,13 +857,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
         { requestId }
       ).then(result => {
         if (result) {
-          req.responseBody = result.base64Encoded 
+          let body = result.base64Encoded 
             ? `[base64] ${result.body.substring(0, 1000)}${result.body.length > 1000 ? '...' : ''}`
             : result.body
-          req.responseBodyTruncated = result.body.length > 100000
-          if (req.responseBodyTruncated) {
-            req.responseBody = result.body.substring(0, 100000) + '\n... [truncated]'
+          
+          // Redact sensitive patterns from body
+          if (!result.base64Encoded) {
+            body = redactBody(body)
           }
+          
+          req.responseBodyTruncated = body.length > 100000
+          if (req.responseBodyTruncated) {
+            body = body.substring(0, 100000) + '\n... [truncated]'
+          }
+          req.responseBody = body
         }
       }).catch(() => {
         // Body might not be available
