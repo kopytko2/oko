@@ -140,6 +140,108 @@ Oko/
 - Sensitive headers (Authorization, Cookie) are redacted in captures
 - CORS restricted to localhost and Gitpod origins
 
+## FAQ
+
+### What can I use Oko for?
+
+**API Reverse Engineering**
+- Capture network traffic from any web app to understand its API
+- Get full request/response bodies including headers and payloads
+- Filter by URL pattern to focus on specific endpoints
+- Export captured data for documentation or automation
+
+**Browser Automation**
+- Control browser tabs programmatically from your dev environment
+- Fill forms, click buttons, and navigate pages via API
+- Take screenshots for visual testing or documentation
+- Select elements visually and get their selectors
+
+**Testing & Debugging**
+- Monitor API calls while interacting with a web app
+- Capture authentication flows and token exchanges
+- Debug webhook integrations by inspecting payloads
+- Verify frontend-backend communication
+
+**Data Extraction**
+- Capture paginated API responses as you browse
+- Extract data from authenticated sessions
+- Monitor real-time updates via WebSocket inspection
+
+### How is this different from browser DevTools?
+
+Oko exposes browser capabilities via REST API, so you can:
+- Access browser data from a remote dev environment (Gitpod, Codespaces, SSH)
+- Script and automate captures programmatically
+- Integrate with other tools and workflows
+- Let AI agents interact with your browser
+
+### Can I use this with AI coding assistants?
+
+Yes - Oko is designed to work with AI agents. The API lets agents:
+- See what tabs you have open
+- Capture network traffic to understand APIs
+- Take screenshots to see the current page state
+- Click elements and fill forms to interact with web apps
+
+## Troubleshooting
+
+### Connection Issues
+
+**"Cannot reach server" or connection timeout**
+- Verify the backend is running (`npm start` in `backend/`)
+- Check the URL is correct (include `https://` for remote)
+- For Gitpod/Ona: ensure the port is public, not private
+
+**"Auth failed - check token"**
+- Token must match exactly (no extra spaces)
+- For remote connections, token is required
+- Token is in `/tmp/oko-auth-token` or use `OKO_AUTH_TOKEN` env var
+
+**Extension shows "Offline" but backend is running**
+- Click "Reconnect" button in popup
+- Check browser console for WebSocket errors
+- Try closing and reopening the popup
+
+**Badge shows red "!" icon**
+- WebSocket disconnected - click popup and hit "Reconnect"
+- Backend may have restarted - paste connection code again
+
+### Network Capture Issues
+
+**"No debugger session for this tab"**
+- Call `/api/browser/debugger/enable` first with the tab ID
+- Debugger sessions expire if the tab navigates or closes
+
+**Requests not being captured**
+- Ensure debugger is enabled BEFORE the requests happen
+- Check `urlPattern` filter isn't too restrictive
+- Some requests (service workers, extensions) may not be captured
+
+**Response bodies are empty or truncated**
+- Very large responses may be truncated
+- Binary responses (images, files) are not captured
+- Check the `responseBody` field exists in the response
+
+### Element Picker Issues
+
+**Picker doesn't activate with Alt+Shift+A**
+- Some pages block content scripts (chrome://, extension pages)
+- Try refreshing the page
+- Check extension has permission for the site
+
+**Selected element not received by backend**
+- WebSocket may be disconnected - check connection status
+- Element selections are queued if disconnected, sent on reconnect
+
+### Common Error Codes
+
+| Code | Meaning | Solution |
+|------|---------|----------|
+| 401 | Unauthorized | Check auth token |
+| 503 | No extension connected | Open extension popup, verify connection |
+| 504 | Extension timeout | Extension may be suspended, interact with browser |
+| 429 | Rate limited | Wait a minute, reduce request frequency |
+
 ## License
 
 MIT
