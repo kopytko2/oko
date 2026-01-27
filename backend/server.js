@@ -731,15 +731,46 @@ function generateConnectionCode(url, token) {
   return `oko:${Buffer.from(payload).toString('base64')}`
 }
 
-server.listen(PORT, () => {
-  console.log(`[Server] Oko backend listening on port ${PORT}`)
+/**
+ * Get the public URL for a port using gitpod CLI
+ * Falls back to environment variables if CLI fails
+ */
+async function getGitpodPortUrl(port) {
+  const { execSync } = require('child_process')
   
-  // Detect Ona/Gitpod environment and output copy/paste config
+  try {
+    // Try gitpod CLI first - most reliable
+    const output = execSync(`gitpod environment port list -o json`, { 
+      encoding: 'utf-8',
+      timeout: 5000 
+    })
+    const ports = JSON.parse(output)
+    const portInfo = ports.find(p => p.port === port)
+    if (portInfo?.url) {
+      return portInfo.url
+    }
+  } catch (e) {
+    console.log('[Server] gitpod CLI not available, trying env vars')
+  }
+  
+  // Fallback to environment variables
   const gitpodEnvId = process.env.GITPOD_ENVIRONMENT_ID
   if (gitpodEnvId) {
-    // Running in Ona environment - output the remote URL config
     const region = process.env.GITPOD_REGION || 'us-east-1-01'
-    const backendUrl = `https://${PORT}--${gitpodEnvId}.${region}.gitpod.dev`
+    return `https://${port}--${gitpodEnvId}.${region}.gitpod.dev`
+  }
+  
+  return null
+}
+
+server.listen(PORT, async () => {
+  console.log(`[Server] Oko backend listening on port ${PORT}`)
+  
+  // Try to get Gitpod URL for connection code
+  const backendUrl = await getGitpodPortUrl(PORT)
+  
+  if (backendUrl) {
+    // Running in Gitpod/Ona environment - output the remote URL config
     const connectionCode = generateConnectionCode(backendUrl, WS_AUTH_TOKEN)
     console.log('')
     console.log('='.repeat(60))
