@@ -3,8 +3,15 @@ tasks:
     name: Install Dependencies
     command: |
       cd backend && npm ci
+      cd ../extension && npm ci
     triggeredBy:
       - postDevcontainerStart
+
+  ci:
+    name: CI Check
+    description: Run typecheck and tests
+    command: |
+      cd extension && npm run ci
 
 services:
   oko-backend:
