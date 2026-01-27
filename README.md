@@ -39,7 +39,13 @@ Token: <generated-token>
 
 ### 3. Connect
 
-Open the Oko extension popup, paste the URL and token, click **Test** then **Save**.
+**Quick connect (recommended):**
+1. Copy the connection code from the backend output (starts with `oko:`)
+2. Open the Oko extension popup
+3. Paste the code into the "Connection Code" field - it auto-saves and connects
+
+**Manual setup:**
+Open the Oko extension popup, paste the URL and token separately, click **Test** then **Save**.
 
 ## API Reference
 
@@ -125,12 +131,38 @@ Oko/
 │   ├── server.js      # Express + WebSocket server
 │   └── package.json
 ├── extension/
-│   ├── background.js  # Service worker
+│   ├── background/    # TypeScript source modules
+│   │   ├── websocket.ts      # WebSocket connection handling
+│   │   ├── browserMcp/       # Browser automation handlers
+│   │   └── __tests__/        # Vitest test suite
+│   ├── background.js  # Bundled service worker
 │   ├── picker.js      # Element picker overlay
 │   ├── popup.html/js  # Extension popup UI
 │   └── manifest.json
 ├── AGENTS.md          # Notes for AI agents
+├── INSTALL.md         # User installation guide
 └── README.md
+```
+
+## Development
+
+### Extension
+
+```bash
+cd extension
+npm install
+npm run build      # Build TypeScript to background.js
+npm run typecheck  # Type checking
+npm run lint       # ESLint
+npm test           # Run vitest tests
+```
+
+### Backend
+
+```bash
+cd backend
+npm install
+npm start          # Start server on port 8129
 ```
 
 ## Security
@@ -141,6 +173,11 @@ Oko/
 - **Tokens expire after 24 hours** (configurable via `OKO_TOKEN_EXPIRY_HOURS`)
 - Token file written with mode 600 (owner-only read)
 - Localhost connections don't require auth (for local development)
+
+### WebSocket Security
+- **First-message authentication** - tokens sent in first WebSocket message, not URL query string (avoids logging tokens in server logs, browser history, proxies)
+- **5-second auth timeout** - unauthenticated connections are closed after 5 seconds
+- Token expiry checked on both HTTP and WebSocket connections
 
 ### Data Protection
 - Sensitive headers (Authorization, Cookie, Set-Cookie) are **redacted by default**
