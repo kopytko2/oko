@@ -123,10 +123,10 @@ export async function connectWebSocket(): Promise<void> {
   const connectAttempt = (async () => {
     // Get connection settings
     const connection = await getConnection()
-    let wsUrl = connection.wsUrl
+    const wsUrl = connection.wsUrl
 
-    // Try to fetch auth token from backend, fall back to configured token
-    let tokenAcquired = false
+    // Get auth token for first-message auth
+    let authToken: string | null = null
     try {
       const tokenUrl = buildUrl(connection.apiUrl, '/api/auth/token')
       const headers: Record<string, string> = {}
@@ -138,23 +138,22 @@ export async function connectWebSocket(): Promise<void> {
       if (tokenResponse.ok) {
         const data = await tokenResponse.json()
         if (data.token) {
-          wsUrl = `${connection.wsUrl}?token=${data.token}`
-          tokenAcquired = true
-          log.debug('Got auth token from backend for WebSocket')
+          authToken = data.token
+          log.debug('Got auth token from backend')
         }
       }
     } catch (err) {
       log.warn('Failed to fetch token from backend', { error: err instanceof Error ? err.message : String(err) })
     }
     
-    // Fall back to configured auth token if backend didn't provide one
-    if (!tokenAcquired && connection.authToken) {
-      wsUrl = `${connection.wsUrl}?token=${connection.authToken}`
-      log.debug('Using configured auth token for WebSocket')
+    // Fall back to configured auth token
+    if (!authToken && connection.authToken) {
+      authToken = connection.authToken
+      log.debug('Using configured auth token')
     }
 
-    connectionState.setConnecting(wsUrl.replace(/token=.*/, 'token=***'))
-    log.info('Connecting to WebSocket', { url: wsUrl.replace(/token=.*/, 'token=***') })
+    connectionState.setConnecting(wsUrl)
+    log.info('Connecting to WebSocket', { url: wsUrl })
     const newWs = new WebSocket(wsUrl)
     setWs(newWs)
 
@@ -168,13 +167,42 @@ export async function connectWebSocket(): Promise<void> {
         return
       }
 
-      log.info('WebSocket connected')
+      log.info('WebSocket connected, authenticating')
+      
+      // Send auth message first (token not in URL for security)
+      if (authToken) {
+        newWs.send(JSON.stringify({ type: 'auth', token: authToken }))
+      } else {
+        // Localhost without token - server will auto-authenticate
+        onAuthSuccess(newWs)
+      }
+    }
+    
+    newWs.onmessage = (event) => {
+      if (ws !== newWs) return
+      try {
+        const message = JSON.parse(event.data)
+        
+        // Handle auth response
+        if (message.type === 'auth-success') {
+          onAuthSuccess(newWs)
+          return
+        }
+        
+        routeWebSocketMessage(message)
+      } catch (err) {
+        log.error('Failed to parse WebSocket message', err instanceof Error ? err : undefined)
+      }
+    }
+    
+    function onAuthSuccess(socket: WebSocket) {
+      log.info('WebSocket authenticated')
       connectionState.setConnected()
       chrome.alarms.clear(ALARM_WS_RECONNECT)
       startPing()
 
       // Identify as extension client
-      sendToWebSocket({ type: 'identify', clientType: 'extension' })
+      socket.send(JSON.stringify({ type: 'identify', clientType: 'extension' }))
       broadcastToClients({ type: 'WS_CONNECTED' })
       
       // Flush any queued element selections
@@ -188,16 +216,6 @@ export async function connectWebSocket(): Promise<void> {
       
       // Update badge to show connected
       updateBadge(true)
-    }
-
-    newWs.onmessage = (event) => {
-      if (ws !== newWs) return
-      try {
-        const message = JSON.parse(event.data)
-        routeWebSocketMessage(message)
-      } catch (err) {
-        log.error('Failed to parse WebSocket message', err instanceof Error ? err : undefined)
-      }
     }
 
     newWs.onerror = (error) => {

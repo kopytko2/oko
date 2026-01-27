@@ -616,35 +616,109 @@ const wss = new WebSocket.Server({ server })
 // Track connected clients
 const clients = new Map()
 
+// Auth timeout for first-message auth (5 seconds)
+const WS_AUTH_TIMEOUT_MS = 5000
+
 wss.on('connection', (ws, req) => {
-  // Validate auth token
-  const url = new URL(req.url, `http://localhost`)
-  const token = url.searchParams.get('token') || req.headers['x-auth-token']
+  const clientId = crypto.randomUUID()
   
   // Check if connection is from localhost using socket address
   const remoteAddr = req.socket?.remoteAddress || ''
   const isLocal = remoteAddr === '127.0.0.1' || 
                   remoteAddr === '::1' || 
                   remoteAddr === '::ffff:127.0.0.1'
+  const isLocalNoAuth = isLocal && !process.env.OKO_AUTH_TOKEN
   
-  // For localhost without env token, allow unauthenticated
-  if (!isLocal || process.env.OKO_AUTH_TOKEN) {
-    if (token !== WS_AUTH_TOKEN) {
-      console.warn(`[WS] Unauthorized connection attempt from ${remoteAddr}`)
-      ws.close(4001, 'Unauthorized')
-      return
+  // For localhost without env token, auto-authenticate
+  if (isLocalNoAuth) {
+    clients.set(clientId, { ws, type: 'unknown', token: '__local__', authenticated: true })
+    console.log(`[WS] Client connected (localhost): ${clientId}`)
+    setupClientHandlers(clientId, ws)
+    return
+  }
+  
+  // For remote connections, require first-message auth
+  // Client must send { type: 'auth', token: '...' } within timeout
+  clients.set(clientId, { ws, type: 'unknown', token: null, authenticated: false })
+  console.log(`[WS] Client connected (pending auth): ${clientId}`)
+  
+  const authTimeout = setTimeout(() => {
+    const client = clients.get(clientId)
+    if (client && !client.authenticated) {
+      console.warn(`[WS] Auth timeout for client ${clientId}`)
+      ws.close(4001, 'Auth timeout')
+      clients.delete(clientId)
+    }
+  }, WS_AUTH_TIMEOUT_MS)
+  
+  // Handle first message for auth
+  const authHandler = (data) => {
+    try {
+      const message = JSON.parse(data.toString())
+      
+      if (message.type === 'auth') {
+        clearTimeout(authTimeout)
+        const token = message.token
+        
+        if (token !== WS_AUTH_TOKEN) {
+          console.warn(`[WS] Invalid token from ${remoteAddr}`)
+          ws.close(4001, 'Invalid token')
+          clients.delete(clientId)
+          return
+        }
+        
+        if (isTokenExpired()) {
+          console.warn(`[WS] Expired token from ${remoteAddr}`)
+          ws.close(4001, 'Token expired')
+          clients.delete(clientId)
+          return
+        }
+        
+        // Auth successful
+        const client = clients.get(clientId)
+        if (client) {
+          client.authenticated = true
+          client.token = token
+          console.log(`[WS] Client authenticated: ${clientId}`)
+          ws.send(JSON.stringify({ type: 'auth-success' }))
+          
+          // Remove auth handler and set up normal handlers
+          ws.removeListener('message', authHandler)
+          setupClientHandlers(clientId, ws)
+        }
+      } else {
+        // Non-auth message before authentication
+        console.warn(`[WS] Unauthenticated message from ${clientId}: ${message.type}`)
+        ws.close(4001, 'Auth required')
+        clients.delete(clientId)
+        clearTimeout(authTimeout)
+      }
+    } catch (err) {
+      console.error('[WS] Failed to parse auth message:', err)
+      ws.close(4002, 'Invalid message')
+      clients.delete(clientId)
+      clearTimeout(authTimeout)
     }
   }
   
-  const clientId = crypto.randomUUID()
-  // Store token with client for session scoping
-  // For localhost without OKO_AUTH_TOKEN env var, always use __local__ key
-  // This ensures HTTP requests without token can still fetch selections
-  const isLocalNoAuth = isLocal && !process.env.OKO_AUTH_TOKEN
-  const selectionKey = isLocalNoAuth ? '__local__' : (token || clientId)
-  clients.set(clientId, { ws, type: 'unknown', token: selectionKey })
-  console.log(`[WS] Client connected: ${clientId}, selectionKey: ${selectionKey === '__local__' ? '__local__' : '***'}`)
+  ws.on('message', authHandler)
   
+  ws.on('close', () => {
+    clearTimeout(authTimeout)
+    clients.delete(clientId)
+    console.log(`[WS] Client disconnected: ${clientId}`)
+  })
+  
+  ws.on('error', (err) => {
+    clearTimeout(authTimeout)
+    console.error(`[WS] Client error (${clientId}):`, err.message)
+  })
+})
+
+/**
+ * Set up message handlers for authenticated client
+ */
+function setupClientHandlers(clientId, ws) {
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString())
@@ -662,7 +736,7 @@ wss.on('connection', (ws, req) => {
   ws.on('error', (err) => {
     console.error(`[WS] Client error (${clientId}):`, err.message)
   })
-})
+}
 
 /**
  * Handle incoming WebSocket messages
