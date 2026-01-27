@@ -3,12 +3,20 @@
  * Handles connection to backend, reconnection, and message routing
  */
 
+import { createLogger } from './logger'
+import { getConnectionSettings } from './storage'
+import * as connectionState from './connectionState'
+import { handleError, DEFAULT_RETRY_CONFIG } from './errors'
 import {
-  ws, setWs, wsReconnectAttempts, setWsReconnectAttempts, incrementWsReconnectAttempts,
-  MAX_RECONNECT_ATTEMPTS, ALARM_WS_RECONNECT,
+  ws, setWs,
   broadcastToClients, flushElementSelections
 } from './state'
 import { getConnection, buildUrl } from '../lib/api'
+
+const log = createLogger('WebSocket')
+
+// Alarm name for reconnection
+const ALARM_WS_RECONNECT = 'ws-reconnect'
 
 // Forward declaration for reconnect scheduler
 let scheduleReconnectFn: (() => void) | null = null
@@ -16,6 +24,13 @@ let connectInFlight: Promise<void> | null = null
 const PING_INTERVAL_MS = 30000
 let pingIntervalId: ReturnType<typeof setInterval> | null = null
 let manualDisconnect = false
+
+/**
+ * Check if WebSocket is currently connected
+ */
+export function isWebSocketConnected(): boolean {
+  return ws?.readyState === WebSocket.OPEN
+}
 
 /**
  * Update extension badge to show connection state
@@ -28,6 +43,13 @@ function updateBadge(connected: boolean): void {
     chrome.action.setBadgeText({ text: '!' })
     chrome.action.setBadgeBackgroundColor({ color: '#E90007' })
   }
+}
+
+/**
+ * Get current reconnect attempts from connection state
+ */
+function getReconnectAttempts(): number {
+  return connectionState.getState().connection.reconnectAttempts
 }
 
 export function setScheduleReconnect(fn: () => void): void {
@@ -57,10 +79,10 @@ export function sendToWebSocket(data: unknown): void {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(data))
   } else {
-    console.error('[Background] WebSocket not connected. State:', ws?.readyState)
+    log.error('WebSocket not connected', undefined, { state: ws?.readyState })
     // Try to reconnect if not connected
     if (!ws || ws.readyState === WebSocket.CLOSED) {
-      console.log('[Background] Attempting to reconnect WebSocket...')
+      log.info('Attempting to reconnect WebSocket')
       connectWebSocket()
     }
   }
@@ -78,13 +100,13 @@ export async function connectWebSocket(): Promise<void> {
 
   // Already connected
   if (ws?.readyState === WebSocket.OPEN) {
-    console.log('[Background] WebSocket already connected')
+    log.debug('WebSocket already connected')
     return
   }
 
   // Already connecting
   if (ws?.readyState === WebSocket.CONNECTING) {
-    console.log('[Background] WebSocket already connecting')
+    log.debug('WebSocket already connecting')
     return
   }
 
@@ -118,20 +140,21 @@ export async function connectWebSocket(): Promise<void> {
         if (data.token) {
           wsUrl = `${connection.wsUrl}?token=${data.token}`
           tokenAcquired = true
-          console.log('[Background] Got auth token from backend for WebSocket')
+          log.debug('Got auth token from backend for WebSocket')
         }
       }
     } catch (err) {
-      console.log('[Background] Failed to fetch token from backend:', err)
+      log.warn('Failed to fetch token from backend', { error: err instanceof Error ? err.message : String(err) })
     }
     
     // Fall back to configured auth token if backend didn't provide one
     if (!tokenAcquired && connection.authToken) {
       wsUrl = `${connection.wsUrl}?token=${connection.authToken}`
-      console.log('[Background] Using configured auth token for WebSocket')
+      log.debug('Using configured auth token for WebSocket')
     }
 
-    console.log('[Background] Connecting to WebSocket:', wsUrl.replace(/token=.*/, 'token=***'))
+    connectionState.setConnecting(wsUrl.replace(/token=.*/, 'token=***'))
+    log.info('Connecting to WebSocket', { url: wsUrl.replace(/token=.*/, 'token=***') })
     const newWs = new WebSocket(wsUrl)
     setWs(newWs)
 
@@ -145,8 +168,8 @@ export async function connectWebSocket(): Promise<void> {
         return
       }
 
-      console.log('[Background] WebSocket connected')
-      setWsReconnectAttempts(0)
+      log.info('WebSocket connected')
+      connectionState.setConnected()
       chrome.alarms.clear(ALARM_WS_RECONNECT)
       startPing()
 
@@ -157,7 +180,7 @@ export async function connectWebSocket(): Promise<void> {
       // Flush any queued element selections
       const queued = flushElementSelections()
       if (queued.length > 0) {
-        console.log(`[Background] Flushing ${queued.length} queued element selections`)
+        log.info('Flushing queued element selections', { count: queued.length })
         for (const item of queued) {
           sendToWebSocket({ type: 'element-selected', element: item.element })
         }
@@ -173,13 +196,13 @@ export async function connectWebSocket(): Promise<void> {
         const message = JSON.parse(event.data)
         routeWebSocketMessage(message)
       } catch (err) {
-        console.error('[Background] Failed to parse WebSocket message:', err)
+        log.error('Failed to parse WebSocket message', err instanceof Error ? err : undefined)
       }
     }
 
     newWs.onerror = (error) => {
       if (ws !== newWs) return
-      console.error('[Background] WebSocket error:', error)
+      log.error('WebSocket error', undefined, { error: String(error) })
     }
 
     newWs.onclose = (event) => {
@@ -190,21 +213,24 @@ export async function connectWebSocket(): Promise<void> {
         1006: 'Abnormal closure (connection lost)',
         4001: 'Unauthorized'
       }
-      console.log('[Background] WebSocket closed:', {
+      
+      const closeReason = codeDescriptions[event.code] || 'Unknown'
+      log.info('WebSocket closed', {
         code: event.code,
-        description: codeDescriptions[event.code] || 'Unknown',
+        description: closeReason,
         reason: event.reason || '(no reason)'
       })
 
       setWs(null)
       stopPing()
+      connectionState.setDisconnected(closeReason)
       broadcastToClients({ type: 'WS_DISCONNECTED' })
       
       // Update badge to show disconnected
       updateBadge(false)
 
       // Schedule reconnection
-      if (!manualDisconnect && scheduleReconnectFn && wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      if (!manualDisconnect && scheduleReconnectFn && connectionState.canReconnect(DEFAULT_RETRY_CONFIG.maxAttempts)) {
         scheduleReconnectFn()
       }
     }
@@ -270,19 +296,23 @@ function routeWebSocketMessage(message: Record<string, unknown>): void {
  */
 export function scheduleReconnect(): void {
   if (manualDisconnect) {
-    console.log('[Background] Auto-reconnect disabled (manual disconnect)')
+    log.debug('Auto-reconnect disabled (manual disconnect)')
     return
   }
-  const attempts = incrementWsReconnectAttempts()
   
-  if (attempts > MAX_RECONNECT_ATTEMPTS) {
-    console.log('[Background] Max reconnect attempts reached')
+  const currentAttempts = getReconnectAttempts()
+  const nextAttempt = currentAttempts + 1
+  
+  if (!connectionState.canReconnect(DEFAULT_RETRY_CONFIG.maxAttempts)) {
+    log.warn('Max reconnect attempts reached', { attempts: currentAttempts })
     return
   }
 
+  connectionState.setReconnecting(nextAttempt)
+
   // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
-  const delaySeconds = Math.min(Math.pow(2, attempts - 1), 30)
-  console.log(`[Background] Scheduling reconnect in ${delaySeconds}s (attempt ${attempts})`)
+  const delaySeconds = Math.min(Math.pow(2, nextAttempt - 1), 30)
+  log.info('Scheduling reconnect', { delaySeconds, attempt: nextAttempt })
   
   chrome.alarms.create(ALARM_WS_RECONNECT, {
     delayInMinutes: delaySeconds / 60
@@ -298,7 +328,7 @@ setScheduleReconnect(scheduleReconnect)
 export function initWebSocketAlarms(): void {
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM_WS_RECONNECT) {
-      console.log('[Background] Reconnect alarm fired')
+      log.debug('Reconnect alarm fired')
       connectWebSocket()
     }
   })

@@ -3,29 +3,50 @@
  * Entry point for the extension's background processes
  */
 
-import { connectedClients, ws, queueElementSelection } from './state'
-import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms, sendToWebSocket } from './websocket'
+import { createLogger } from './logger'
+import { initStorage, onStorageChange } from './storage'
+import * as connectionState from './connectionState'
+import { connectedClients, queueElementSelection, broadcastToClients } from './state'
+import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms, sendToWebSocket, isWebSocketConnected } from './websocket'
 import { initCacheListener } from '../lib/api'
 
-// Initialize on service worker start
-console.log('[Background] Oko service worker starting')
+const log = createLogger('Background')
 
-// Set up cache invalidation listener
-initCacheListener()
-
-// Set up WebSocket alarm handlers
-initWebSocketAlarms()
-
-// Connect to backend
-connectWebSocket()
+/**
+ * Initialize the background service worker
+ */
+async function init(): Promise<void> {
+  log.info('Oko service worker starting')
+  
+  // Initialize storage wrapper
+  await initStorage()
+  
+  // Set up cache invalidation listener
+  initCacheListener()
+  
+  // Set up WebSocket alarm handlers
+  initWebSocketAlarms()
+  
+  // Listen for storage changes to trigger reconnection
+  onStorageChange((change) => {
+    if (change.key === 'backendUrl' || change.key === 'authToken') {
+      log.info('Connection settings changed, reconnecting')
+      disconnectWebSocket()
+      connectWebSocket()
+    }
+  })
+  
+  // Connect to backend
+  connectWebSocket()
+}
 
 // Handle extension page connections
 chrome.runtime.onConnect.addListener((port) => {
-  console.log('[Background] Client connected:', port.name)
+  log.debug('Client connected', { name: port.name })
   connectedClients.add(port)
 
   port.onDisconnect.addListener(() => {
-    console.log('[Background] Client disconnected:', port.name)
+    log.debug('Client disconnected', { name: port.name })
     connectedClients.delete(port)
   })
 
@@ -38,6 +59,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const type = message?.type as string | undefined
   if (type === 'DISCONNECT') {
     disconnectWebSocket()
+    connectionState.setDisconnected('Manual disconnect')
     sendResponse({ success: true })
     return true
   }
@@ -47,14 +69,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (type === 'GET_WS_STATUS') {
-    sendResponse({ connected: ws?.readyState === WebSocket.OPEN })
+    const state = connectionState.getState()
+    sendResponse({ 
+      connected: isWebSocketConnected(),
+      status: state.connection.status,
+      reconnectAttempts: state.connection.reconnectAttempts
+    })
+    return true
+  }
+  if (type === 'GET_STATE') {
+    sendResponse(connectionState.getState())
     return true
   }
   if (type === 'ELEMENT_SELECTED') {
     const element = message.element as Record<string, unknown>
     element.tabId = sender.tab?.id
     
-    if (ws?.readyState === WebSocket.OPEN) {
+    if (isWebSocketConnected()) {
       sendToWebSocket({ type: 'element-selected', element })
     } else {
       // Queue for later when connection is restored
@@ -82,7 +113,8 @@ function handleClientMessage(
       // Return current WebSocket connection status
       port.postMessage({
         type: 'CONNECTION_STATUS',
-        connected: ws?.readyState === WebSocket.OPEN
+        connected: isWebSocketConnected(),
+        state: connectionState.getState()
       })
       break
 
@@ -92,20 +124,22 @@ function handleClientMessage(
       break
 
     default:
-      console.log('[Background] Unknown message type:', type)
+      log.debug('Unknown message type', { type })
   }
 }
 
 // Handle extension install/update
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Background] Extension installed/updated:', details.reason)
+  log.info('Extension installed/updated', { reason: details.reason })
 })
 
 // Keep service worker alive with periodic alarm
 chrome.alarms.create('keepalive', { periodInMinutes: 1 })
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'keepalive') {
-    // Just log to keep service worker active
-    console.log('[Background] Keepalive ping')
+    log.debug('Keepalive ping')
   }
 })
+
+// Start initialization
+void init()

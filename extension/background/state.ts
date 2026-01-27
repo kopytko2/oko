@@ -1,15 +1,17 @@
 /**
  * Shared state for background service worker
- * Centralized state management for WebSocket connection and clients
+ * 
+ * This module holds runtime state that doesn't fit in connectionState.ts
+ * (which handles connection state machine) or storage.ts (which handles persistence).
  */
+
+import { createLogger } from './logger'
+import * as connectionState from './connectionState'
+
+const log = createLogger('State')
 
 // WebSocket connection to backend
 export let ws: WebSocket | null = null
-export let wsReconnectAttempts = 0
-export const MAX_RECONNECT_ATTEMPTS = 10
-
-// Alarm names for service worker persistence
-export const ALARM_WS_RECONNECT = 'ws-reconnect'
 
 // Track connected clients (popup, sidepanel, devtools)
 export const connectedClients = new Set<chrome.runtime.Port>()
@@ -24,11 +26,14 @@ const MAX_QUEUED_SELECTIONS = 10
 const QUEUE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 export function queueElementSelection(element: Record<string, unknown>): void {
-  // Remove expired entries
   const now = Date.now()
+  let droppedCount = 0
+  
+  // Remove expired entries
   while (pendingElementSelections.length > 0 && 
-         now - pendingElementSelections[0].timestamp > QUEUE_TTL_MS) {
+         now - (pendingElementSelections[0]?.timestamp ?? 0) > QUEUE_TTL_MS) {
     pendingElementSelections.shift()
+    droppedCount++
   }
   
   // Add new selection
@@ -37,29 +42,36 @@ export function queueElementSelection(element: Record<string, unknown>): void {
   // Trim to max size (keep most recent)
   while (pendingElementSelections.length > MAX_QUEUED_SELECTIONS) {
     pendingElementSelections.shift()
+    droppedCount++
   }
   
-  console.log(`[Background] Queued element selection (${pendingElementSelections.length} pending)`)
+  // Update connection state for observability
+  connectionState.updateQueueState({
+    length: pendingElementSelections.length,
+    droppedCount,
+    oldestTimestamp: pendingElementSelections[0]?.timestamp ?? null
+  })
+  
+  log.info('Queued element selection', { pending: pendingElementSelections.length, dropped: droppedCount })
 }
 
 export function flushElementSelections(): QueuedElement[] {
   const items = [...pendingElementSelections]
   pendingElementSelections.length = 0
+  
+  // Reset queue state
+  connectionState.updateQueueState({
+    length: 0,
+    droppedCount: 0,
+    oldestTimestamp: null
+  })
+  
   return items
 }
 
 // State setters
 export function setWs(newWs: WebSocket | null): void {
   ws = newWs
-}
-
-export function setWsReconnectAttempts(attempts: number): void {
-  wsReconnectAttempts = attempts
-}
-
-export function incrementWsReconnectAttempts(): number {
-  wsReconnectAttempts++
-  return wsReconnectAttempts
 }
 
 // Message types for extension communication
@@ -76,7 +88,7 @@ export function broadcastToClients(message: ExtensionMessage): void {
     try {
       port.postMessage(message)
     } catch (err) {
-      console.error('[Background] Failed to send message to client:', err)
+      log.error('Failed to send message to client', err instanceof Error ? err : undefined)
       connectedClients.delete(port)
     }
   })
