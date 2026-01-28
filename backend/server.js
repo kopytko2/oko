@@ -3,13 +3,16 @@
  * Provides browser automation APIs for Ona environments
  */
 
-const express = require('express')
-const cors = require('cors')
-const rateLimit = require('express-rate-limit')
-const http = require('http')
-const WebSocket = require('ws')
-const crypto = require('crypto')
-const fs = require('fs')
+import express from 'express'
+import cors from 'cors'
+import rateLimit from 'express-rate-limit'
+import http from 'http'
+import { WebSocketServer } from 'ws'
+import crypto from 'crypto'
+import fs from 'fs'
+import { execSync } from 'child_process'
+
+const WebSocket = { OPEN: 1 } // WebSocket.OPEN constant
 
 // =============================================================================
 // CONFIGURATION
@@ -348,13 +351,18 @@ app.post('/api/browser/navigate', async (req, res) => {
     return res.status(400).json({ success: false, error: 'url is required (max 2048 chars)' })
   }
 
-  const tabId = parseInteger(body.tabId)
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
   const newTab = body.newTab === true
   const active = body.active !== false
 
   sendToExtension(req, res, 'browser-navigate', {
     url,
-    tabId: tabId !== null && tabId >= 0 ? tabId : undefined,
+    tabId: tabId !== null ? tabId : undefined,
     newTab,
     active
   })
@@ -368,7 +376,7 @@ app.get('/api/browser/selected-element', requireAuth, (req, res) => {
   // Check TTL
   if (!entry || Date.now() - entry.timestamp > SELECTION_TTL_MS) {
     if (entry) selectedElements.delete(key)
-    return res.json({ success: false, error: 'No element selected (use Alt+Shift+A to pick an element)' })
+    return res.json({ success: true, element: null, hint: 'Use Alt+Shift+A to pick an element' })
   }
   
   res.json({ success: true, element: entry.element })
@@ -581,6 +589,31 @@ app.post('/api/browser/click', async (req, res) => {
   })
 })
 
+app.post('/api/browser/fill', async (req, res) => {
+  const body = req.body || {}
+  const selector = parseString(body.selector, 1000)
+  if (!selector) {
+    return res.status(400).json({ success: false, error: 'selector required' })
+  }
+
+  const value = body.value
+  if (typeof value !== 'string') {
+    return res.status(400).json({ success: false, error: 'value required (string)' })
+  }
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  sendToExtension(req, res, 'browser-fill-element', {
+    tabId,
+    selector,
+    value
+  })
+})
+
 app.get('/api/browser/screenshot', async (req, res) => {
   const query = req.query || {}
   const tabIdValue = query.tabId
@@ -611,7 +644,7 @@ app.get('/api/browser/screenshot', async (req, res) => {
 // WEBSOCKET SERVER
 // =============================================================================
 
-const wss = new WebSocket.Server({ server })
+const wss = new WebSocketServer({ server })
 
 // Track connected clients
 const clients = new Map()
@@ -810,8 +843,6 @@ function generateConnectionCode(url, token) {
  * Falls back to environment variables if CLI fails
  */
 async function getGitpodPortUrl(port) {
-  const { execSync } = require('child_process')
-  
   try {
     // Try gitpod CLI first - most reliable
     const output = execSync(`gitpod environment port list -o json`, { 
@@ -837,37 +868,41 @@ async function getGitpodPortUrl(port) {
   return null
 }
 
-server.listen(PORT, async () => {
-  console.log(`[Server] Oko backend listening on port ${PORT}`)
-  
-  // Try to get Gitpod URL for connection code
-  const backendUrl = await getGitpodPortUrl(PORT)
-  
-  if (backendUrl) {
-    // Running in Gitpod/Ona environment - output the remote URL config
-    const connectionCode = generateConnectionCode(backendUrl, WS_AUTH_TOKEN)
-    console.log('')
-    console.log('='.repeat(60))
-    console.log('  Oko Extension - paste this code in the extension popup:')
-    console.log('='.repeat(60))
-    console.log('')
-    console.log(`  ${connectionCode}`)
-    console.log('')
-    console.log('='.repeat(60))
-    console.log('')
-  } else {
-    // Local development - no code needed, extension auto-detects localhost
-    console.log(`[Server] Health check: http://localhost:${PORT}/api/health`)
-    console.log('[Server] Local mode (no auth required for localhost)')
-  }
-})
+// Start server only when run directly (not when imported for testing)
+const isMainModule = process.argv[1]?.endsWith('server.js')
+if (isMainModule) {
+  server.listen(PORT, async () => {
+    console.log(`[Server] Oko backend listening on port ${PORT}`)
+    
+    // Try to get Gitpod URL for connection code
+    const backendUrl = await getGitpodPortUrl(PORT)
+    
+    if (backendUrl) {
+      // Running in Gitpod/Ona environment - output the remote URL config
+      const connectionCode = generateConnectionCode(backendUrl, WS_AUTH_TOKEN)
+      console.log('')
+      console.log('='.repeat(60))
+      console.log('  Oko Extension - paste this code in the extension popup:')
+      console.log('='.repeat(60))
+      console.log('')
+      console.log(`  ${connectionCode}`)
+      console.log('')
+      console.log('='.repeat(60))
+      console.log('')
+    } else {
+      // Local development - no code needed, extension auto-detects localhost
+      console.log(`[Server] Health check: http://localhost:${PORT}/api/health`)
+      console.log('[Server] Local mode (no auth required for localhost)')
+    }
+  })
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[Server] Shutting down...')
-  wss.close()
-  server.close()
-  process.exit(0)
-})
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('[Server] Shutting down...')
+    wss.close()
+    server.close()
+    process.exit(0)
+  })
+}
 
-module.exports = { app, server, wss, broadcastToType }
+export { app, server, wss, broadcastToType, PORT, WS_AUTH_TOKEN }
