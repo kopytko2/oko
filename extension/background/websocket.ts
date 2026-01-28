@@ -4,9 +4,8 @@
  */
 
 import { createLogger } from './logger'
-import { getConnectionSettings } from './storage'
 import * as connectionState from './connectionState'
-import { handleError, DEFAULT_RETRY_CONFIG } from './errors'
+import { DEFAULT_RETRY_CONFIG } from './errors'
 import {
   ws, setWs,
   broadcastToClients, flushElementSelections
@@ -30,11 +29,7 @@ import {
   handleClearDebuggerRequests
 } from './browserMcp/debugger'
 import {
-  isBrowserRequest,
   safeParseBrowserRequest,
-  createErrorResponse,
-  type BrowserRequestType,
-  BROWSER_REQUEST_TYPES,
 } from '@oko/shared'
 
 const log = createLogger('WebSocket')

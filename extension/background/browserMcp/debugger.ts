@@ -153,7 +153,7 @@ async function fetchResponseBody(
   }
 }
 
-function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: string): void {
+function onDebuggerDetach(source: chrome.debugger.Debuggee, _reason: string): void {
   const tabId = source.tabId
   if (tabId) {
     const session = sessions.get(tabId)
@@ -189,7 +189,7 @@ export async function handleEnableDebuggerCapture(message: EnableDebuggerMessage
     ensureListeners()
     
     // Check if already attached
-    let session = sessions.get(tabId)
+    const session = sessions.get(tabId)
     if (session?.attached) {
       sendToWebSocket({
         type: 'browser-enable-debugger-capture-result',

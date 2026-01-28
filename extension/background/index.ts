@@ -6,7 +6,7 @@
 import { createLogger } from './logger'
 import { initStorage, onStorageChange } from './storage'
 import * as connectionState from './connectionState'
-import { connectedClients, queueElementSelection, broadcastToClients } from './state'
+import { connectedClients, queueElementSelection } from './state'
 import { connectWebSocket, disconnectWebSocket, initWebSocketAlarms, sendToWebSocket, isWebSocketConnected } from './websocket'
 import { initCacheListener } from '../lib/api'
 
@@ -32,14 +32,14 @@ async function init(): Promise<void> {
     if (change.key === 'backendUrl' || change.key === 'authToken') {
       log.info('Connection settings changed, reconnecting')
       disconnectWebSocket()
-      connectWebSocket()
+      void connectWebSocket()
     }
   })
   
   // Only auto-connect if URL is already configured
   const settings = await chrome.storage.sync.get(['backendUrl'])
   if (settings.backendUrl) {
-    connectWebSocket()
+    void connectWebSocket()
   } else {
     log.info('No backend URL configured, waiting for connection code')
   }
@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (type === 'RECONNECT') {
-    connectWebSocket()
+    void connectWebSocket()
     sendResponse({ success: true })
     return true
   }
@@ -96,7 +96,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Queue for later when connection is restored
       queueElementSelection(element)
       // Try to reconnect
-      connectWebSocket()
+      void connectWebSocket()
     }
     sendResponse({ success: true })
     return true
@@ -125,7 +125,7 @@ function handleClientMessage(
 
     case 'RECONNECT':
       // Force reconnection
-      connectWebSocket()
+      void connectWebSocket()
       break
 
     default:

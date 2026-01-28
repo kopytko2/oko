@@ -72,17 +72,61 @@ export function hasRequestId(data: unknown): data is { requestId: string } {
 }
 
 /**
+ * Error categories for structured error handling
+ */
+export enum ErrorCategory {
+  VALIDATION = 'validation',      // Invalid input
+  NOT_FOUND = 'not_found',        // Resource not found
+  PERMISSION = 'permission',      // Permission denied
+  NETWORK = 'network',            // Network/connection error
+  TIMEOUT = 'timeout',            // Operation timed out
+  INTERNAL = 'internal',          // Internal error
+  UNKNOWN = 'unknown',            // Unknown error
+}
+
+/**
+ * Structured error response
+ */
+export interface StructuredError {
+  type: string
+  requestId: string
+  success: false
+  error: string
+  category: ErrorCategory
+  retryable: boolean
+}
+
+/**
  * Create a typed error response for a request
  */
 export function createErrorResponse(
   requestType: string,
   requestId: string,
-  error: string
-): { type: string; requestId: string; success: false; error: string } {
+  error: string,
+  category: ErrorCategory = ErrorCategory.UNKNOWN
+): StructuredError {
+  const retryable = [ErrorCategory.NETWORK, ErrorCategory.TIMEOUT].includes(category)
   return {
     type: `${requestType}-result`,
     requestId,
     success: false,
     error,
+    category,
+    retryable,
   }
+}
+
+/**
+ * Classify an error into a category
+ */
+export function classifyError(error: unknown): ErrorCategory {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase()
+    if (message.includes('timeout')) return ErrorCategory.TIMEOUT
+    if (message.includes('network') || message.includes('connection')) return ErrorCategory.NETWORK
+    if (message.includes('not found') || message.includes('no element')) return ErrorCategory.NOT_FOUND
+    if (message.includes('permission') || message.includes('denied')) return ErrorCategory.PERMISSION
+    if (message.includes('invalid') || message.includes('required')) return ErrorCategory.VALIDATION
+  }
+  return ErrorCategory.UNKNOWN
 }

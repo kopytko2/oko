@@ -9,6 +9,34 @@
 import { z } from 'zod'
 
 // =============================================================================
+// PROTOCOL VERSION
+// =============================================================================
+
+/**
+ * Protocol version for compatibility checking.
+ * Increment MAJOR for breaking changes, MINOR for additions, PATCH for fixes.
+ */
+export const PROTOCOL_VERSION = '1.0.0'
+
+export const ProtocolVersionSchema = z.object({
+  major: z.number(),
+  minor: z.number(),
+  patch: z.number(),
+})
+
+export function parseProtocolVersion(version: string): { major: number; minor: number; patch: number } {
+  const [major, minor, patch] = version.split('.').map(Number)
+  return { major: major ?? 0, minor: minor ?? 0, patch: patch ?? 0 }
+}
+
+export function isCompatibleVersion(clientVersion: string, serverVersion: string): boolean {
+  const client = parseProtocolVersion(clientVersion)
+  const server = parseProtocolVersion(serverVersion)
+  // Major version must match for compatibility
+  return client.major === server.major
+}
+
+// =============================================================================
 // COMMON SCHEMAS
 // =============================================================================
 
@@ -311,6 +339,7 @@ export const AuthSuccessMessage = z.object({
 export const IdentifyMessage = z.object({
   type: z.literal('identify'),
   clientType: z.literal('extension'),
+  protocolVersion: z.string().optional(), // Protocol version for compatibility checking
 })
 
 export const PingMessage = z.object({

@@ -4,10 +4,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
-import puppeteer, { Browser, Page, Target, WebWorker } from 'puppeteer'
+import type { Browser, Target, WebWorker } from 'puppeteer';
+import puppeteer from 'puppeteer'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { spawn, ChildProcess } from 'child_process'
+import type { ChildProcess } from 'child_process';
+import { spawn } from 'child_process'
 import http from 'http'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -52,7 +54,7 @@ async function startBackend(): Promise<string> {
         try {
           authToken = fs.readFileSync('/tmp/oko-auth-token', 'utf-8').trim()
           resolve(authToken)
-        } catch (e) {
+        } catch (_e) {
           reject(new Error('Failed to read auth token'))
         }
       }
@@ -136,7 +138,7 @@ async function getServiceWorker(browser: Browser): Promise<WebWorker> {
 function getExtensionId(worker: WebWorker): string {
   const url = worker.url()
   const match = url.match(/chrome-extension:\/\/([a-z]+)\//)
-  if (!match) {
+  if (!match || !match[1]) {
     throw new Error('Failed to extract extension ID from URL')
   }
   return match[1]
@@ -171,7 +173,7 @@ describe('Oko Extension E2E Tests', () => {
   beforeEach(async () => {
     // Launch browser with extension
     browser = await puppeteer.launch({
-      headless: 'new', // Use new headless mode that supports extensions
+      headless: false, // Extensions require non-headless mode
       args: [
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
@@ -376,7 +378,7 @@ describe('Oko Extension E2E Tests', () => {
       
       // Get the tab ID
       const pages = await browser.pages()
-      const testPageIndex = pages.indexOf(testPage)
+      const _testPageIndex = pages.indexOf(testPage)
       
       // The button should exist
       const buttonText = await testPage.$eval('#test-btn', el => el.textContent)
@@ -402,7 +404,7 @@ describe('Oko Extension E2E Tests', () => {
       // Fill via Puppeteer
       await testPage.type('#test-input', 'Hello World')
       
-      const value = await testPage.$eval('#test-input', (el: HTMLInputElement) => el.value)
+      const value = await testPage.$eval('#test-input', (el) => (el as HTMLInputElement).value)
       expect(value).toBe('Hello World')
     })
 
