@@ -1,6 +1,16 @@
 /**
  * Debugger-based Network Capture
  * Uses Chrome DevTools Protocol to capture full request/response bodies
+ * 
+ * IMPORTANT: MV3 State Volatility
+ * --------------------------------
+ * This module uses in-memory Maps to store captured requests and debugger sessions.
+ * In Manifest V3, the service worker can be suspended, which will:
+ * 1. Clear all captured request data
+ * 2. Lose track of active debugger sessions (though Chrome may keep them attached)
+ * 
+ * Current behavior: "Best effort" capture with explicit enable/disable lifecycle.
+ * Users should disable debugger capture when done to avoid orphaned sessions.
  */
 
 import { sendToWebSocket } from '../websocket'

@@ -29,6 +29,13 @@ import {
   handleGetDebuggerRequests,
   handleClearDebuggerRequests
 } from './browserMcp/debugger'
+import {
+  isBrowserRequest,
+  safeParseBrowserRequest,
+  createErrorResponse,
+  type BrowserRequestType,
+  BROWSER_REQUEST_TYPES,
+} from '@oko/shared'
 
 const log = createLogger('WebSocket')
 
@@ -345,8 +352,14 @@ async function routeWebSocketMessage(message: ValidMessage): Promise<void> {
     return
   }
 
-  // Browser MCP requests - handle and respond
-  if (type.startsWith('browser-')) {
+  // Browser MCP requests - validate with shared schema and handle
+  if (type.startsWith('browser-') && !type.endsWith('-result')) {
+    // Validate against shared schema
+    const validated = safeParseBrowserRequest(message)
+    if (!validated) {
+      log.warn('Invalid browser request format', { type, message })
+      // Still try to handle it for backwards compatibility
+    }
     await handleBrowserRequest(type, message)
     return
   }

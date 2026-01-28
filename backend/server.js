@@ -1,6 +1,12 @@
 /**
  * Oko Backend Server
  * Provides browser automation APIs for Ona environments
+ * 
+ * Module structure:
+ * - lib/config.js    - Configuration and constants
+ * - lib/cors.js      - CORS middleware
+ * - lib/auth.js      - Authentication middleware
+ * - lib/validation.js - Input validation utilities
  */
 
 import express from 'express'
@@ -12,39 +18,41 @@ import crypto from 'crypto'
 import fs from 'fs'
 import { execSync } from 'child_process'
 
+// Import from lib modules
+import {
+  PORT,
+  WS_AUTH_TOKEN,
+  TOKEN_EXPIRY_MS,
+  TOKEN_CREATED_AT,
+  isTokenExpired,
+  EXTENSION_REQUEST_TIMEOUT_MS,
+  EXTENSION_FULL_PAGE_TIMEOUT_MS,
+  initTokenFile,
+} from './lib/config.js'
+
+import {
+  privateNetworkMiddleware,
+  corsOptions,
+} from './lib/cors.js'
+
+import {
+  isLocalRequest,
+  validateToken,
+  requireAuth,
+} from './lib/auth.js'
+
+import {
+  parseInteger,
+  parseString,
+  parseStringArray,
+  getSessionId,
+  getSelectionKey,
+} from './lib/validation.js'
+
 const WebSocket = { OPEN: 1 } // WebSocket.OPEN constant
 
-// =============================================================================
-// CONFIGURATION
-// =============================================================================
-
-const PORT = process.env.PORT || 8129
-const WS_AUTH_TOKEN_FILE = '/tmp/oko-auth-token'
-
-// Auth token: use environment variable for remote, generate random for local
-const WS_AUTH_TOKEN = process.env.OKO_AUTH_TOKEN || crypto.randomBytes(32).toString('hex')
-
-// Token expiry: 24 hours from server start (configurable via env)
-const TOKEN_EXPIRY_MS = parseInt(process.env.OKO_TOKEN_EXPIRY_HOURS || '24', 10) * 60 * 60 * 1000
-const TOKEN_CREATED_AT = Date.now()
-
-function isTokenExpired() {
-  return Date.now() - TOKEN_CREATED_AT > TOKEN_EXPIRY_MS
-}
-const EXTENSION_REQUEST_TIMEOUT_MS = 10000
-const EXTENSION_FULL_PAGE_TIMEOUT_MS = 30000
-
-// Write token to file for local development (extension can read it)
-if (!process.env.OKO_AUTH_TOKEN) {
-  try {
-    fs.writeFileSync(WS_AUTH_TOKEN_FILE, WS_AUTH_TOKEN, { mode: 0o600 })
-    console.log(`[Auth] Token written to ${WS_AUTH_TOKEN_FILE}`)
-  } catch (err) {
-    console.error(`[Auth] Failed to write token file: ${err.message}`)
-  }
-} else {
-  console.log('[Auth] Using OKO_AUTH_TOKEN from environment')
-}
+// Initialize token file
+initTokenFile()
 
 // =============================================================================
 // EXPRESS APP
@@ -56,48 +64,8 @@ const server = http.createServer(app)
 // JSON body parser
 app.use(express.json())
 
-// =============================================================================
-// CORS CONFIGURATION
-// =============================================================================
-
-// Handle Private Network Access preflight BEFORE cors() (Chrome 94+)
-// Must be before cors() because cors() ends OPTIONS responses
-app.use((req, res, next) => {
-  if (req.headers['access-control-request-private-network']) {
-    res.setHeader('Access-Control-Allow-Private-Network', 'true')
-  }
-  next()
-})
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (same-origin, curl, etc.)
-    if (!origin) {
-      return callback(null, true)
-    }
-
-    // Allow Chrome extensions
-    if (origin.startsWith('chrome-extension://')) {
-      return callback(null, true)
-    }
-
-    // Allow Gitpod/Ona URLs
-    if (origin.match(/\.gitpod\.(dev|io)$/)) {
-      return callback(null, true)
-    }
-
-    // Allow localhost (exact match to prevent localhost.attacker)
-    if (origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
-      return callback(null, true)
-    }
-
-    // Reject other origins
-    console.warn(`[CORS] Rejected origin: ${origin}`)
-    callback(new Error('Not allowed by CORS'))
-  },
-  credentials: true
-}
-
+// CORS configuration (from lib/cors.js)
+app.use(privateNetworkMiddleware)
 app.use(cors(corsOptions))
 
 // =============================================================================
@@ -120,61 +88,7 @@ const browserApiLimiter = rateLimit({
   }
 })
 
-// =============================================================================
-// AUTH MIDDLEWARE
-// =============================================================================
-
-/**
- * Check if request is from localhost using socket address (not spoofable Host header)
- */
-function isLocalRequest(req) {
-  const remoteAddr = req.socket?.remoteAddress || req.ip || ''
-  // IPv4 localhost or IPv6 localhost
-  return remoteAddr === '127.0.0.1' || 
-         remoteAddr === '::1' || 
-         remoteAddr === '::ffff:127.0.0.1'
-}
-
-/**
- * Validate auth token from header or query param
- * Returns true if valid, false otherwise
- */
-function validateToken(req) {
-  const token = req.headers['x-auth-token'] || req.query.token
-  
-  // For localhost, allow unauthenticated requests if no env token is set
-  if (!process.env.OKO_AUTH_TOKEN && isLocalRequest(req)) {
-    return { valid: true }
-  }
-  
-  if (token !== WS_AUTH_TOKEN) {
-    return { valid: false, reason: 'invalid' }
-  }
-  
-  if (isTokenExpired()) {
-    return { valid: false, reason: 'expired' }
-  }
-  
-  return { valid: true }
-}
-
-/**
- * Auth middleware for protected routes
- */
-function requireAuth(req, res, next) {
-  const result = validateToken(req)
-  if (!result.valid) {
-    const message = result.reason === 'expired' 
-      ? 'Token expired. Restart the backend to generate a new token.'
-      : 'Invalid or missing auth token'
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message,
-      reason: result.reason
-    })
-  }
-  next()
-}
+// Auth middleware imported from lib/auth.js
 
 // =============================================================================
 // HEALTH & AUTH ENDPOINTS
@@ -235,56 +149,7 @@ const pendingRequests = new Map()
 const selectedElements = new Map()
 const SELECTION_TTL_MS = 5 * 60 * 1000
 
-/**
- * Get session ID from auth token (for per-user scoping)
- */
-function getSessionId(req) {
-  const token = req.headers['x-auth-token'] || ''
-  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 16)
-}
-
-/**
- * Get session key for selected elements and extension targeting
- */
-function getSelectionKey(req) {
-  // For localhost without OKO_AUTH_TOKEN env var, always use __local__
-  // This matches WS behavior and ignores any token the client might send
-  if (!process.env.OKO_AUTH_TOKEN && isLocalRequest(req)) {
-    return '__local__'
-  }
-  const token = req.headers['x-auth-token'] || req.query.token || ''
-  return token || '__local__'
-}
-
-function parseInteger(value) {
-  if (value === undefined || value === null) return null
-  if (typeof value === 'number' && Number.isInteger(value)) return value
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value)
-    if (Number.isInteger(parsed)) return parsed
-  }
-  return null
-}
-
-function parseString(value, maxLength) {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  if (maxLength && trimmed.length > maxLength) return null
-  return trimmed
-}
-
-function parseStringArray(value, maxLength) {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value)) return null
-  const parsed = []
-  for (const item of value) {
-    const entry = parseString(item, maxLength)
-    if (!entry) return null
-    parsed.push(entry)
-  }
-  return parsed
-}
+// Validation utilities imported from lib/validation.js
 
 function getExtensionClients() {
   const extensionClients = []
@@ -607,7 +472,7 @@ app.post('/api/browser/fill', async (req, res) => {
     return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
   }
 
-  sendToExtension(req, res, 'browser-fill-element', {
+  sendToExtension(req, res, 'browser-fill-input', {
     tabId,
     selector,
     value

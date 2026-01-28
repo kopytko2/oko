@@ -17,6 +17,9 @@
     "check": "npm run typecheck && npm run test",
     "ci": "npm run typecheck && npm run test"
   },
+  "dependencies": {
+    "@oko/shared": "file:../shared"
+  },
   "devDependencies": {
     "puppeteer": "^24.0.0",
     "@types/chrome": "^0.0.268",

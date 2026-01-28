@@ -1,6 +1,21 @@
 /**
  * Network Capture Handler
  * Captures and stores network requests using chrome.webRequest API
+ * 
+ * IMPORTANT: MV3 State Volatility
+ * --------------------------------
+ * This module uses in-memory Maps to store captured requests. In Manifest V3,
+ * the service worker can be suspended at any time, which will clear this state.
+ * 
+ * Current behavior: "Best effort" capture - data may be lost on suspension.
+ * 
+ * Mitigation strategies (not yet implemented):
+ * 1. Use chrome.storage.session for persistence across suspensions
+ * 2. Push captured data to backend immediately as it arrives
+ * 3. Accept data loss and document it as expected behavior
+ * 
+ * The keepalive alarm in websocket.ts helps prevent suspension during active
+ * capture, but Chrome can still suspend the worker under memory pressure.
  */
 
 import { sendToWebSocket } from '../websocket'

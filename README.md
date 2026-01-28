@@ -179,6 +179,24 @@ npm start          # Start server on port 8129
 - **5-second auth timeout** - unauthenticated connections are closed after 5 seconds
 - Token expiry checked on both HTTP and WebSocket connections
 
+## Known Limitations
+
+### MV3 Service Worker Suspension
+Chrome's Manifest V3 can suspend the extension's service worker at any time to save resources. This affects:
+
+- **Network capture** - Captured requests are stored in memory and will be lost on suspension
+- **Debugger sessions** - May become orphaned if worker suspends while debugger is attached
+
+**Mitigations:**
+- A keepalive alarm runs every 25 seconds during active WebSocket connections
+- Debugger capture shows a visible banner, keeping the tab active
+- For critical captures, retrieve data frequently rather than accumulating
+
+**Best practices:**
+- Disable network/debugger capture when not actively using it
+- Retrieve captured requests promptly after the interaction you're monitoring
+- Don't rely on captured data persisting across long idle periods
+
 ### Data Protection
 - Sensitive headers (Authorization, Cookie, Set-Cookie) are **redacted by default**
 - Response bodies can contain sensitive data - use `redactHeaders` option to add custom patterns

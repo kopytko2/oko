@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Oko WebSocket message types - shared between backend and extension",
+  "version": "1.0.0",
+  
+  "browserRequests": {
+    "browser-list-tabs": {
+      "description": "List all open browser tabs",
+      "request": {},
+      "response": { "tabs": "Tab[]" }
+    },
+    "browser-navigate": {
+      "description": "Navigate to URL in new or existing tab",
+      "request": { "url": "string", "tabId?": "number", "newTab?": "boolean", "active?": "boolean" },
+      "response": { "tab": "Tab" }
+    },
+    "browser-screenshot": {
+      "description": "Capture screenshot of tab",
+      "request": { "tabId?": "number", "fullPage?": "boolean" },
+      "response": { "screenshot": "string (base64)" }
+    },
+    "browser-get-element-info": {
+      "description": "Get information about a DOM element",
+      "request": { "tabId?": "number", "selector": "string", "includeStyles?": "boolean", "styleProperties?": "string[]" },
+      "response": { "element": "ElementInfo" }
+    },
+    "browser-click-element": {
+      "description": "Click a DOM element",
+      "request": { "tabId?": "number", "selector": "string" },
+      "response": {}
+    },
+    "browser-fill-input": {
+      "description": "Fill an input element with a value",
+      "request": { "tabId?": "number", "selector": "string", "value": "string" },
+      "response": {}
+    },
+    "browser-enable-network-capture": {
+      "description": "Enable network request capture",
+      "request": { "tabId?": "number", "urlFilter?": "string[]" },
+      "response": {}
+    },
+    "browser-disable-network-capture": {
+      "description": "Disable network request capture",
+      "request": {},
+      "response": {}
+    },
+    "browser-get-network-requests": {
+      "description": "Get captured network requests",
+      "request": { "tabId?": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number" },
+      "response": { "requests": "NetworkRequest[]" }
+    },
+    "browser-enable-debugger-capture": {
+      "description": "Enable debugger-based network capture with response bodies",
+      "request": { "tabId": "number", "urlFilter?": "string[]", "maxRequests?": "number", "captureBody?": "boolean" },
+      "response": {}
+    },
+    "browser-disable-debugger-capture": {
+      "description": "Disable debugger-based network capture",
+      "request": { "tabId": "number" },
+      "response": {}
+    },
+    "browser-get-debugger-requests": {
+      "description": "Get debugger-captured requests with response bodies",
+      "request": { "tabId": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number" },
+      "response": { "requests": "DebuggerRequest[]" }
+    },
+    "browser-clear-debugger-requests": {
+      "description": "Clear debugger-captured requests",
+      "request": { "tabId": "number" },
+      "response": {}
+    }
+  },
+  
+  "extensionMessages": {
+    "identify": {
+      "description": "Extension identifies itself to backend",
+      "payload": { "clientType": "extension" }
+    },
+    "ping": {
+      "description": "Keepalive ping",
+      "payload": { "ts": "number" }
+    },
+    "pong": {
+      "description": "Keepalive pong response",
+      "payload": { "ts": "number" }
+    },
+    "element-selected": {
+      "description": "User selected an element with picker",
+      "payload": { "element": "ElementInfo" }
+    },
+    "auth": {
+      "description": "First-message authentication",
+      "payload": { "token": "string" }
+    },
+    "auth-success": {
+      "description": "Authentication successful",
+      "payload": {}
+    }
+  }
+}

@@ -63,7 +63,7 @@ async function executeInTabWithArgs<T, A extends unknown[]>(
 /**
  * Script to get element info (runs in page context)
  */
-function getElementInfoScript(selector: string, includeStyles: boolean, styleProperties?: string[]): ElementInfo | null {
+function getElementInfoScript(selector: string, includeStyles: boolean, styleProperties: string[] | null): ElementInfo | null {
   const element = document.querySelector(selector)
   if (!element) return null
   
@@ -258,10 +258,11 @@ export async function handleGetElementInfo(message: GetElementInfoMessage): Prom
   try {
     const tabId = await getTargetTabId(message.tabId)
     
+    // Chrome scripting API can't serialize undefined, use null instead
     const elementInfo = await executeInTabWithArgs(
       tabId,
       getElementInfoScript,
-      [message.selector, message.includeStyles ?? true, message.styleProperties]
+      [message.selector, message.includeStyles ?? true, message.styleProperties ?? null]
     )
     
     if (!elementInfo) {
