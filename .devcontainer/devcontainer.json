@@ -1,0 +1,11 @@
+{
+  "name": "Oko",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [8129],
+  "portsAttributes": {
+    "8129": {
+      "label": "Oko Backend",
+      "onAutoForward": "notify"
+    }
+  }
+}
