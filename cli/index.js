@@ -66,7 +66,9 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
         throw new Error(`Unhandled command: ${parsed.key}`)
     }
 
-    writeData(data, config.output, parsed.key, io.stdout)
+    if (!data?._skipOutput) {
+      writeData(data, config.output, parsed.key, io.stdout)
+    }
 
     if (parsed.key === 'doctor') {
       return data.success ? 0 : 1

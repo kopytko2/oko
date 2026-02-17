@@ -3,6 +3,8 @@ import readline from 'readline/promises'
 import { CliAbortError, UsageError } from '../errors.js'
 import { serializeForFile } from '../format.js'
 
+const FOLLOW_POLL_INTERVAL_MS = 700
+
 function isTabCandidate(tab) {
   return tab && typeof tab.id === 'number'
 }
@@ -99,6 +101,76 @@ export async function waitForCaptureWindow(options, io, abortSignal) {
   })
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchDebuggerRequests(client, tabId, options) {
+  const result = await client.get('/api/browser/debugger/requests', {
+    query: {
+      tabId,
+      urlPattern: options.urlPattern,
+      limit: options.maxRequests,
+    },
+  })
+  return Array.isArray(result?.requests) ? result.requests : []
+}
+
+function requestKey(req, fallbackIndex) {
+  if (req?.requestId) return String(req.requestId)
+  const method = req?.method || ''
+  const url = req?.url || ''
+  const ts = req?.timestamp || ''
+  return `${method}|${url}|${ts}|${fallbackIndex}`
+}
+
+async function streamFollowLoop({ client, tabId, options, io, shouldStop, abortSignal, pollIntervalMs = FOLLOW_POLL_INTERVAL_MS }) {
+  const seen = new Set()
+  let emitted = 0
+
+  const emitBatch = async () => {
+    const requests = await fetchDebuggerRequests(client, tabId, options)
+    const unseen = []
+    for (let i = 0; i < requests.length; i += 1) {
+      const req = requests[i]
+      const key = requestKey(req, i)
+      if (!seen.has(key)) {
+        seen.add(key)
+        unseen.push(req)
+      }
+    }
+
+    unseen.reverse()
+    for (const req of unseen) {
+      io.stdout.write(`${JSON.stringify(req)}\n`)
+      emitted += 1
+    }
+  }
+
+  while (true) {
+    if (abortSignal.aborted) break
+    try {
+      await emitBatch()
+    } catch {
+      // Keep streaming best-effort.
+    }
+
+    if (shouldStop()) break
+    await delay(pollIntervalMs)
+  }
+
+  // Final flush after stop to avoid dropping trailing requests.
+  if (!abortSignal.aborted) {
+    try {
+      await emitBatch()
+    } catch {
+      // Best effort.
+    }
+  }
+
+  return emitted
+}
+
 export async function runCaptureApi({ client, options, output, io, processRef = process }) {
   const tabId = await resolveCaptureTabId(client, options)
   const controller = new AbortController()
@@ -128,7 +200,43 @@ export async function runCaptureApi({ client, options, output, io, processRef = 
     })
     captureEnabled = true
 
-    await waitForCaptureWindow(options, io, controller.signal)
+    let followShouldStop = false
+    const followPromise = options.follow
+      ? streamFollowLoop({
+        client,
+        tabId,
+        options,
+        io,
+        shouldStop: () => followShouldStop,
+        abortSignal: controller.signal,
+        pollIntervalMs: options.followPollMs || FOLLOW_POLL_INTERVAL_MS,
+      })
+      : null
+    let streamedCount = 0
+
+    try {
+      await waitForCaptureWindow(options, io, controller.signal)
+    } finally {
+      followShouldStop = true
+      if (followPromise) {
+        try {
+          streamedCount = await followPromise
+        } catch {
+          // Keep cleanup resilient if polling loop fails.
+        }
+      }
+    }
+
+    if (options.follow) {
+      return {
+        success: true,
+        tabId,
+        mode: options.mode,
+        streamed: true,
+        streamedCount,
+        _skipOutput: true,
+      }
+    }
 
     const result = await client.get('/api/browser/debugger/requests', {
       query: {
