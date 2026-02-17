@@ -453,9 +453,18 @@ app.post('/api/browser/click', async (req, res) => {
     return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
   }
 
+  let mode = 'human'
+  if (body.mode !== undefined) {
+    if (body.mode !== 'human' && body.mode !== 'native') {
+      return res.status(400).json({ success: false, error: "mode must be 'human' or 'native'" })
+    }
+    mode = body.mode
+  }
+
   sendToExtension(req, res, 'browser-click-element', {
     tabId,
-    selector
+    selector,
+    mode
   })
 })
 
@@ -481,6 +490,300 @@ app.post('/api/browser/fill', async (req, res) => {
     tabId,
     selector,
     value
+  })
+})
+
+app.post('/api/browser/hover', async (req, res) => {
+  const body = req.body || {}
+  const selector = parseString(body.selector, 1000)
+  if (!selector) {
+    return res.status(400).json({ success: false, error: 'selector required' })
+  }
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  sendToExtension(req, res, 'browser-hover-element', {
+    tabId,
+    selector
+  })
+})
+
+app.post('/api/browser/type', async (req, res) => {
+  const body = req.body || {}
+  const selector = parseString(body.selector, 1000)
+  if (!selector) {
+    return res.status(400).json({ success: false, error: 'selector required' })
+  }
+
+  if (typeof body.text !== 'string') {
+    return res.status(400).json({ success: false, error: 'text required (string)' })
+  }
+  const text = body.text
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let clear = false
+  if (body.clear !== undefined) {
+    if (typeof body.clear !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'clear must be a boolean' })
+    }
+    clear = body.clear
+  }
+
+  let delayMs = 35
+  if (body.delayMs !== undefined) {
+    const parsedDelayMs = parseInteger(body.delayMs)
+    if (parsedDelayMs === null || parsedDelayMs < 0 || parsedDelayMs > 5000) {
+      return res.status(400).json({ success: false, error: 'delayMs must be an integer between 0 and 5000' })
+    }
+    delayMs = parsedDelayMs
+  }
+
+  sendToExtension(req, res, 'browser-type-input', {
+    tabId,
+    selector,
+    text,
+    clear,
+    delayMs
+  })
+})
+
+app.post('/api/browser/key', async (req, res) => {
+  const body = req.body || {}
+  const key = parseString(body.key, 64)
+  if (!key) {
+    return res.status(400).json({ success: false, error: 'key required' })
+  }
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  const modifiers = parseStringArray(body.modifiers, 32)
+  if (body.modifiers !== undefined && !modifiers) {
+    return res.status(400).json({ success: false, error: 'modifiers must be an array of strings' })
+  }
+
+  sendToExtension(req, res, 'browser-press-key', {
+    tabId,
+    key,
+    modifiers
+  })
+})
+
+function parseFiniteNumber(value) {
+  if (value === undefined) return undefined
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+app.post('/api/browser/scroll', async (req, res) => {
+  const body = req.body || {}
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let selector
+  if (body.selector !== undefined) {
+    selector = parseString(body.selector, 1000)
+    if (!selector) {
+      return res.status(400).json({ success: false, error: 'selector must be a non-empty string' })
+    }
+  }
+
+  const deltaX = parseFiniteNumber(body.deltaX)
+  if (body.deltaX !== undefined && deltaX === null) {
+    return res.status(400).json({ success: false, error: 'deltaX must be a finite number' })
+  }
+
+  const deltaY = parseFiniteNumber(body.deltaY)
+  if (body.deltaY !== undefined && deltaY === null) {
+    return res.status(400).json({ success: false, error: 'deltaY must be a finite number' })
+  }
+
+  let to
+  if (body.to !== undefined) {
+    if (body.to !== 'top' && body.to !== 'bottom') {
+      return res.status(400).json({ success: false, error: "to must be 'top' or 'bottom'" })
+    }
+    to = body.to
+  }
+
+  let behavior = 'auto'
+  if (body.behavior !== undefined) {
+    if (body.behavior !== 'auto' && body.behavior !== 'smooth') {
+      return res.status(400).json({ success: false, error: "behavior must be 'auto' or 'smooth'" })
+    }
+    behavior = body.behavior
+  }
+
+  if (to === undefined && deltaX === undefined && deltaY === undefined) {
+    return res.status(400).json({ success: false, error: 'Specify at least one of to, deltaX, or deltaY' })
+  }
+
+  sendToExtension(req, res, 'browser-scroll', {
+    tabId,
+    selector,
+    deltaX: deltaX === null ? undefined : deltaX,
+    deltaY: deltaY === null ? undefined : deltaY,
+    to,
+    behavior
+  })
+})
+
+app.post('/api/browser/wait', async (req, res) => {
+  const body = req.body || {}
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  const condition = parseString(body.condition, 32)
+  if (!condition || !['element', 'url'].includes(condition)) {
+    return res.status(400).json({ success: false, error: "condition must be 'element' or 'url'" })
+  }
+
+  let selector
+  if (body.selector !== undefined) {
+    selector = parseString(body.selector, 1000)
+    if (!selector) {
+      return res.status(400).json({ success: false, error: 'selector must be a non-empty string' })
+    }
+  }
+
+  let state = 'visible'
+  if (body.state !== undefined) {
+    if (!['present', 'visible', 'hidden'].includes(body.state)) {
+      return res.status(400).json({ success: false, error: "state must be 'present', 'visible', or 'hidden'" })
+    }
+    state = body.state
+  }
+
+  let urlIncludes
+  if (body.urlIncludes !== undefined) {
+    urlIncludes = parseString(body.urlIncludes, 2048)
+    if (!urlIncludes) {
+      return res.status(400).json({ success: false, error: 'urlIncludes must be a non-empty string' })
+    }
+  }
+
+  const timeoutMsParsed = body.timeoutMs === undefined ? 5000 : parseInteger(body.timeoutMs)
+  if (timeoutMsParsed === null || timeoutMsParsed <= 0 || timeoutMsParsed > 120000) {
+    return res.status(400).json({ success: false, error: 'timeoutMs must be an integer between 1 and 120000' })
+  }
+
+  const pollMsParsed = body.pollMs === undefined ? 100 : parseInteger(body.pollMs)
+  if (pollMsParsed === null || pollMsParsed <= 0 || pollMsParsed > 10000) {
+    return res.status(400).json({ success: false, error: 'pollMs must be an integer between 1 and 10000' })
+  }
+
+  if (condition === 'element' && !selector) {
+    return res.status(400).json({ success: false, error: 'selector is required when condition=element' })
+  }
+  if (condition === 'url' && !urlIncludes) {
+    return res.status(400).json({ success: false, error: 'urlIncludes is required when condition=url' })
+  }
+
+  const timeoutMs = Math.max(EXTENSION_REQUEST_TIMEOUT_MS, timeoutMsParsed + 1500)
+  sendToExtension(req, res, 'browser-wait', {
+    tabId,
+    condition,
+    selector,
+    state,
+    urlIncludes,
+    timeoutMs: timeoutMsParsed,
+    pollMs: pollMsParsed
+  }, timeoutMs)
+})
+
+app.post('/api/browser/assert', async (req, res) => {
+  const body = req.body || {}
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let selector
+  if (body.selector !== undefined) {
+    selector = parseString(body.selector, 1000)
+    if (!selector) {
+      return res.status(400).json({ success: false, error: 'selector must be a non-empty string' })
+    }
+  }
+
+  let visible
+  if (body.visible !== undefined) {
+    if (typeof body.visible !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'visible must be a boolean' })
+    }
+    visible = body.visible
+  }
+
+  let enabled
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'enabled must be a boolean' })
+    }
+    enabled = body.enabled
+  }
+
+  let textContains
+  if (body.textContains !== undefined) {
+    if (typeof body.textContains !== 'string') {
+      return res.status(400).json({ success: false, error: 'textContains must be a string' })
+    }
+    textContains = body.textContains
+  }
+
+  let valueEquals
+  if (body.valueEquals !== undefined) {
+    if (typeof body.valueEquals !== 'string') {
+      return res.status(400).json({ success: false, error: 'valueEquals must be a string' })
+    }
+    valueEquals = body.valueEquals
+  }
+
+  let urlIncludes
+  if (body.urlIncludes !== undefined) {
+    if (typeof body.urlIncludes !== 'string') {
+      return res.status(400).json({ success: false, error: 'urlIncludes must be a string' })
+    }
+    urlIncludes = body.urlIncludes
+  }
+
+  if (visible === undefined && enabled === undefined && textContains === undefined && valueEquals === undefined && urlIncludes === undefined) {
+    return res.status(400).json({ success: false, error: 'Provide at least one assertion field' })
+  }
+
+  sendToExtension(req, res, 'browser-assert', {
+    tabId,
+    selector,
+    visible,
+    enabled,
+    textContains,
+    valueEquals,
+    urlIncludes
   })
 })
 

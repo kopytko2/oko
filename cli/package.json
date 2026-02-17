@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@oko/shared": "file:../shared"
+    "@oko/shared": "file:../shared",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

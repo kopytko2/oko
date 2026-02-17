@@ -16,7 +16,7 @@ import { z } from 'zod'
  * Protocol version for compatibility checking.
  * Increment MAJOR for breaking changes, MINOR for additions, PATCH for fixes.
  */
-export const PROTOCOL_VERSION = '1.0.0'
+export const PROTOCOL_VERSION = '1.1.0'
 
 export const ProtocolVersionSchema = z.object({
   major: z.number(),
@@ -125,6 +125,7 @@ export const BrowserClickElementRequest = z.object({
   requestId: z.string(),
   tabId: z.number().optional(),
   selector: z.string(),
+  mode: z.enum(['human', 'native']).optional(),
 })
 
 export const BrowserFillInputRequest = z.object({
@@ -133,6 +134,66 @@ export const BrowserFillInputRequest = z.object({
   tabId: z.number().optional(),
   selector: z.string(),
   value: z.string(),
+})
+
+export const BrowserHoverElementRequest = z.object({
+  type: z.literal('browser-hover-element'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  selector: z.string(),
+})
+
+export const BrowserTypeInputRequest = z.object({
+  type: z.literal('browser-type-input'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  selector: z.string(),
+  text: z.string(),
+  clear: z.boolean().optional(),
+  delayMs: z.number().optional(),
+})
+
+export const BrowserPressKeyRequest = z.object({
+  type: z.literal('browser-press-key'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  key: z.string(),
+  modifiers: z.array(z.string()).optional(),
+})
+
+export const BrowserScrollRequest = z.object({
+  type: z.literal('browser-scroll'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  selector: z.string().optional(),
+  deltaX: z.number().optional(),
+  deltaY: z.number().optional(),
+  to: z.enum(['top', 'bottom']).optional(),
+  behavior: z.enum(['auto', 'smooth']).optional(),
+})
+
+export const BrowserWaitRequest = z.object({
+  type: z.literal('browser-wait'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  condition: z.enum(['element', 'url']),
+  selector: z.string().optional(),
+  state: z.enum(['present', 'visible', 'hidden']).optional(),
+  urlIncludes: z.string().optional(),
+  timeoutMs: z.number().optional(),
+  pollMs: z.number().optional(),
+})
+
+export const BrowserAssertRequest = z.object({
+  type: z.literal('browser-assert'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  selector: z.string().optional(),
+  visible: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+  textContains: z.string().optional(),
+  valueEquals: z.string().optional(),
+  urlIncludes: z.string().optional(),
 })
 
 export const BrowserEnableNetworkCaptureRequest = z.object({
@@ -196,6 +257,12 @@ export const BrowserRequest = z.discriminatedUnion('type', [
   BrowserGetElementInfoRequest,
   BrowserClickElementRequest,
   BrowserFillInputRequest,
+  BrowserHoverElementRequest,
+  BrowserTypeInputRequest,
+  BrowserPressKeyRequest,
+  BrowserScrollRequest,
+  BrowserWaitRequest,
+  BrowserAssertRequest,
   BrowserEnableNetworkCaptureRequest,
   BrowserDisableNetworkCaptureRequest,
   BrowserGetNetworkRequestsRequest,
@@ -252,6 +319,52 @@ export const BrowserFillInputResponse = z.object({
   type: z.literal('browser-fill-input-result'),
   requestId: z.string(),
   success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserHoverElementResponse = z.object({
+  type: z.literal('browser-hover-element-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserTypeInputResponse = z.object({
+  type: z.literal('browser-type-input-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserPressKeyResponse = z.object({
+  type: z.literal('browser-press-key-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserScrollResponse = z.object({
+  type: z.literal('browser-scroll-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserWaitResponse = z.object({
+  type: z.literal('browser-wait-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  matched: z.boolean().optional(),
+  elapsedMs: z.number().optional(),
+  error: z.string().optional(),
+})
+
+export const BrowserAssertResponse = z.object({
+  type: z.literal('browser-assert-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  passed: z.boolean().optional(),
+  details: z.record(z.unknown()).optional(),
   error: z.string().optional(),
 })
 
@@ -314,6 +427,12 @@ export const BrowserResponse = z.discriminatedUnion('type', [
   BrowserGetElementInfoResponse,
   BrowserClickElementResponse,
   BrowserFillInputResponse,
+  BrowserHoverElementResponse,
+  BrowserTypeInputResponse,
+  BrowserPressKeyResponse,
+  BrowserScrollResponse,
+  BrowserWaitResponse,
+  BrowserAssertResponse,
   BrowserNetworkCaptureResponse,
   BrowserDisableNetworkCaptureResponse,
   BrowserGetNetworkRequestsResponse,
@@ -394,6 +513,12 @@ export const BROWSER_REQUEST_TYPES = [
   'browser-get-element-info',
   'browser-click-element',
   'browser-fill-input',
+  'browser-hover-element',
+  'browser-type-input',
+  'browser-press-key',
+  'browser-scroll',
+  'browser-wait',
+  'browser-assert',
   'browser-enable-network-capture',
   'browser-disable-network-capture',
   'browser-get-network-requests',

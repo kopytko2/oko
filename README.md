@@ -8,7 +8,7 @@ Oko is a Chrome extension + backend that lets you automate and inspect your brow
 - **Network capture** - Capture requests with headers, or full response bodies via debugger
 - **Element picker** - Select elements visually with `Alt+Shift+O`
 - **Screenshots** - Capture visible area or full page
-- **DOM interaction** - Click elements, fill inputs, get element info
+- **DOM interaction** - Click, hover, type, press keys, scroll, wait/assert against DOM and URL
 
 ## Quick start
 
@@ -67,6 +67,15 @@ npm run oko -- capture api --follow --until-enter --output ndjson
 # Capture until Enter and write to file
 npm run oko -- capture api --until-enter --out capture.json
 
+# Human-like deterministic browser actions
+npm run oko -- browser hover --tab-id 123 --selector "button.submit"
+npm run oko -- browser type --tab-id 123 --selector "input[name=email]" --text "test@example.com" --clear
+npm run oko -- browser wait --tab-id 123 --condition element --selector "#ready" --state visible
+npm run oko -- browser assert --tab-id 123 --selector "h1" --text-contains "Dashboard"
+
+# Run declarative frontend scenario
+npm run oko -- test run docs/examples/login-scenario.yaml --strict
+
 # Low-level passthrough if needed
 npm run oko -- api get /api/browser/tabs
 ```
@@ -77,6 +86,8 @@ Global options:
 - `--connection-code <oko:...>`
 - `--timeout-ms <n>`
 - `--output json|ndjson|text`
+
+Scenario schema and examples: `docs/testing-scenarios.md`, `docs/examples/login-scenario.yaml`.
 
 ## API Reference
 
@@ -112,6 +123,30 @@ POST /api/browser/click
 # Fill input
 POST /api/browser/fill
 {"tabId": 12345, "selector": "input[name=email]", "value": "test@example.com"}
+
+# Hover element
+POST /api/browser/hover
+{"tabId": 12345, "selector": "button.submit"}
+
+# Type with deterministic key cadence
+POST /api/browser/type
+{"tabId": 12345, "selector": "input[name=email]", "text": "test@example.com", "clear": true, "delayMs": 35}
+
+# Press key
+POST /api/browser/key
+{"tabId": 12345, "key": "Enter", "modifiers": ["Shift"]}
+
+# Scroll
+POST /api/browser/scroll
+{"tabId": 12345, "deltaY": 400, "behavior": "smooth"}
+
+# Wait for condition
+POST /api/browser/wait
+{"tabId": 12345, "condition": "element", "selector": "#ready", "state": "visible", "timeoutMs": 5000, "pollMs": 100}
+
+# Assert condition
+POST /api/browser/assert
+{"tabId": 12345, "selector": "h1", "textContains": "Dashboard"}
 ```
 
 ### Screenshots
@@ -209,6 +244,7 @@ npm test
 
 # from repo root
 npm run oko -- --help
+npm run oko -- test run docs/examples/login-scenario.yaml --strict
 ```
 
 ## Security

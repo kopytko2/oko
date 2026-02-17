@@ -39,6 +39,18 @@ function parsePositiveNumber(value, name) {
   return n
 }
 
+function parseFiniteNumber(value, name) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) throw new UsageError(`${name} must be a finite number`)
+  return n
+}
+
+function parseBoolean(value, name) {
+  if (value === 'true' || value === '1') return true
+  if (value === 'false' || value === '0') return false
+  throw new UsageError(`${name} must be true or false`)
+}
+
 export function extractGlobalOptions(argv) {
   const global = {}
   const commandArgs = []
@@ -98,7 +110,17 @@ export function parseCommand(commandArgs) {
     if (action === 'screenshot') return { key: 'browser.screenshot', options: parseBrowserScreenshotOptions(rest) }
     if (action === 'click') return { key: 'browser.click', options: parseBrowserClickOptions(rest) }
     if (action === 'fill') return { key: 'browser.fill', options: parseBrowserFillOptions(rest) }
-    throw new UsageError('browser command must be one of: screenshot, click, fill')
+    if (action === 'hover') return { key: 'browser.hover', options: parseBrowserHoverOptions(rest) }
+    if (action === 'type') return { key: 'browser.type', options: parseBrowserTypeOptions(rest) }
+    if (action === 'key') return { key: 'browser.key', options: parseBrowserKeyOptions(rest) }
+    if (action === 'scroll') return { key: 'browser.scroll', options: parseBrowserScrollOptions(rest) }
+    if (action === 'wait') return { key: 'browser.wait', options: parseBrowserWaitOptions(rest) }
+    if (action === 'assert') return { key: 'browser.assert', options: parseBrowserAssertOptions(rest) }
+    throw new UsageError('browser command must be one of: screenshot, click, fill, hover, type, key, scroll, wait, assert')
+  }
+
+  if (group === 'test' && action === 'run') {
+    return { key: 'test.run', options: parseTestRunOptions(rest) }
   }
 
   if (group === 'api') {
@@ -234,6 +256,7 @@ export function parseBrowserClickOptions(args) {
   const options = {
     tabId: undefined,
     selector: undefined,
+    mode: 'human',
   }
 
   for (let i = 0; i < args.length; ) {
@@ -247,6 +270,15 @@ export function parseBrowserClickOptions(args) {
     if (token.startsWith('--selector')) {
       const { value, consumed } = readOptionValue(args, i, '--selector')
       options.selector = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--mode')) {
+      const { value, consumed } = readOptionValue(args, i, '--mode')
+      if (!['human', 'native'].includes(value)) {
+        throw new UsageError("--mode must be 'human' or 'native'")
+      }
+      options.mode = value
       i += consumed
       continue
     }
@@ -291,6 +323,359 @@ export function parseBrowserFillOptions(args) {
   if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser fill')
   if (!options.selector) throw new UsageError('--selector is required for browser fill')
   if (options.value === undefined) throw new UsageError('--value is required for browser fill')
+  return options
+}
+
+export function parseBrowserHoverOptions(args) {
+  const options = {
+    tabId: undefined,
+    selector: undefined,
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--selector')) {
+      const { value, consumed } = readOptionValue(args, i, '--selector')
+      options.selector = value
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown hover option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser hover')
+  if (!options.selector) throw new UsageError('--selector is required for browser hover')
+  return options
+}
+
+export function parseBrowserTypeOptions(args) {
+  const options = {
+    tabId: undefined,
+    selector: undefined,
+    text: undefined,
+    clear: false,
+    delayMs: 35,
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token === '--clear') {
+      options.clear = true
+      i += 1
+      continue
+    }
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--selector')) {
+      const { value, consumed } = readOptionValue(args, i, '--selector')
+      options.selector = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--text')) {
+      const { value, consumed } = readOptionValue(args, i, '--text')
+      options.text = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--delay-ms')) {
+      const { value, consumed } = readOptionValue(args, i, '--delay-ms')
+      options.delayMs = parsePositiveInteger(value, '--delay-ms')
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown type option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser type')
+  if (!options.selector) throw new UsageError('--selector is required for browser type')
+  if (options.text === undefined) throw new UsageError('--text is required for browser type')
+  return options
+}
+
+export function parseBrowserKeyOptions(args) {
+  const options = {
+    tabId: undefined,
+    key: undefined,
+    modifiers: [],
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--key')) {
+      const { value, consumed } = readOptionValue(args, i, '--key')
+      options.key = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--mod')) {
+      const { value, consumed } = readOptionValue(args, i, '--mod')
+      options.modifiers.push(value)
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown key option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser key')
+  if (!options.key) throw new UsageError('--key is required for browser key')
+  return options
+}
+
+export function parseBrowserScrollOptions(args) {
+  const options = {
+    tabId: undefined,
+    selector: undefined,
+    deltaX: undefined,
+    deltaY: undefined,
+    to: undefined,
+    behavior: 'auto',
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--selector')) {
+      const { value, consumed } = readOptionValue(args, i, '--selector')
+      options.selector = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--delta-x')) {
+      const { value, consumed } = readOptionValue(args, i, '--delta-x')
+      options.deltaX = parseFiniteNumber(value, '--delta-x')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--delta-y')) {
+      const { value, consumed } = readOptionValue(args, i, '--delta-y')
+      options.deltaY = parseFiniteNumber(value, '--delta-y')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--to')) {
+      const { value, consumed } = readOptionValue(args, i, '--to')
+      if (!['top', 'bottom'].includes(value)) {
+        throw new UsageError("--to must be 'top' or 'bottom'")
+      }
+      options.to = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--behavior')) {
+      const { value, consumed } = readOptionValue(args, i, '--behavior')
+      if (!['auto', 'smooth'].includes(value)) {
+        throw new UsageError("--behavior must be 'auto' or 'smooth'")
+      }
+      options.behavior = value
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown scroll option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser scroll')
+  if (options.to === undefined && options.deltaX === undefined && options.deltaY === undefined) {
+    throw new UsageError('browser scroll requires --to or --delta-x/--delta-y')
+  }
+  return options
+}
+
+export function parseBrowserWaitOptions(args) {
+  const options = {
+    tabId: undefined,
+    condition: undefined,
+    selector: undefined,
+    state: 'visible',
+    urlIncludes: undefined,
+    timeoutMs: 5000,
+    pollMs: 100,
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--condition')) {
+      const { value, consumed } = readOptionValue(args, i, '--condition')
+      if (!['element', 'url'].includes(value)) {
+        throw new UsageError("--condition must be 'element' or 'url'")
+      }
+      options.condition = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--selector')) {
+      const { value, consumed } = readOptionValue(args, i, '--selector')
+      options.selector = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--state')) {
+      const { value, consumed } = readOptionValue(args, i, '--state')
+      if (!['present', 'visible', 'hidden'].includes(value)) {
+        throw new UsageError("--state must be 'present', 'visible', or 'hidden'")
+      }
+      options.state = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--url-includes')) {
+      const { value, consumed } = readOptionValue(args, i, '--url-includes')
+      options.urlIncludes = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--timeout-ms')) {
+      const { value, consumed } = readOptionValue(args, i, '--timeout-ms')
+      options.timeoutMs = parsePositiveInteger(value, '--timeout-ms')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--poll-ms')) {
+      const { value, consumed } = readOptionValue(args, i, '--poll-ms')
+      options.pollMs = parsePositiveInteger(value, '--poll-ms')
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown wait option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser wait')
+  if (!options.condition) throw new UsageError('--condition is required for browser wait')
+  if (options.condition === 'element' && !options.selector) {
+    throw new UsageError('--selector is required when --condition element')
+  }
+  if (options.condition === 'url' && !options.urlIncludes) {
+    throw new UsageError('--url-includes is required when --condition url')
+  }
+  return options
+}
+
+export function parseBrowserAssertOptions(args) {
+  const options = {
+    tabId: undefined,
+    selector: undefined,
+    visible: undefined,
+    enabled: undefined,
+    textContains: undefined,
+    valueEquals: undefined,
+    urlIncludes: undefined,
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(args, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--selector')) {
+      const { value, consumed } = readOptionValue(args, i, '--selector')
+      options.selector = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--visible')) {
+      const { value, consumed } = readOptionValue(args, i, '--visible')
+      options.visible = parseBoolean(value, '--visible')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--enabled')) {
+      const { value, consumed } = readOptionValue(args, i, '--enabled')
+      options.enabled = parseBoolean(value, '--enabled')
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--text-contains')) {
+      const { value, consumed } = readOptionValue(args, i, '--text-contains')
+      options.textContains = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--value-equals')) {
+      const { value, consumed } = readOptionValue(args, i, '--value-equals')
+      options.valueEquals = value
+      i += consumed
+      continue
+    }
+    if (token.startsWith('--url-includes')) {
+      const { value, consumed } = readOptionValue(args, i, '--url-includes')
+      options.urlIncludes = value
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown assert option: ${token}`)
+  }
+
+  if (options.tabId === undefined) throw new UsageError('--tab-id is required for browser assert')
+  if (
+    options.visible === undefined &&
+    options.enabled === undefined &&
+    options.textContains === undefined &&
+    options.valueEquals === undefined &&
+    options.urlIncludes === undefined
+  ) {
+    throw new UsageError('browser assert requires at least one assertion condition')
+  }
+  return options
+}
+
+export function parseTestRunOptions(args) {
+  if (args.length === 0) {
+    throw new UsageError('test run requires a scenario file path')
+  }
+
+  const [scenarioPath, ...rest] = args
+  const options = {
+    scenarioPath,
+    tabId: undefined,
+    strict: false,
+  }
+
+  for (let i = 0; i < rest.length; ) {
+    const token = rest[i]
+    if (token === '--strict') {
+      options.strict = true
+      i += 1
+      continue
+    }
+    if (token.startsWith('--tab-id')) {
+      const { value, consumed } = readOptionValue(rest, i, '--tab-id')
+      options.tabId = parsePositiveInteger(value, '--tab-id')
+      i += consumed
+      continue
+    }
+    throw new UsageError(`Unknown test run option: ${token}`)
+  }
+
   return options
 }
 
@@ -350,5 +735,5 @@ export function parseLowLevelApiOptions(method, args) {
 }
 
 export function getHelpText() {
-  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--follow]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS\n  browser fill --tab-id N --selector CSS --value TEXT\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n  - --follow streams requests as NDJSON lines in real time\n`
+  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--follow]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS [--mode human|native]\n  browser fill --tab-id N --selector CSS --value TEXT\n  browser hover --tab-id N --selector CSS\n  browser type --tab-id N --selector CSS --text TEXT [--clear] [--delay-ms N]\n  browser key --tab-id N --key KEY [--mod MODIFIER]\n  browser scroll --tab-id N [--selector CSS] [--delta-x N] [--delta-y N] [--to top|bottom] [--behavior auto|smooth]\n  browser wait --tab-id N --condition element|url [--selector CSS] [--state present|visible|hidden] [--url-includes TEXT] [--timeout-ms N] [--poll-ms N]\n  browser assert --tab-id N [--selector CSS] [--visible true|false] [--enabled true|false] [--text-contains TEXT] [--value-equals TEXT] [--url-includes TEXT]\n  test run <scenario.yaml> [--tab-id N] [--strict]\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n  - --follow streams requests as NDJSON lines in real time\n`
 }
