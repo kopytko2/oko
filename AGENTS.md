@@ -11,6 +11,26 @@ Oko gives you (the agent) access to the user's browser via REST API. You can:
 - Take screenshots
 - Select elements visually (user triggers with Alt+Shift+A)
 
+## Preferred Agent Interface: CLI
+
+Use the Oko CLI first. It wraps auth, retries, and debugger cleanup:
+
+```bash
+# Health + connectivity diagnostics
+npm run oko -- doctor
+
+# List tabs
+npm run oko -- tabs list
+
+# Capture API traffic from active tab (10s default window)
+npm run oko -- capture api --mode full --url-pattern api
+
+# Capture until Enter and save as JSON
+npm run oko -- capture api --until-enter --out capture.json
+```
+
+Use REST/curl only when you need low-level control.
+
 ## IMPORTANT: Getting Connected
 
 Before using any browser APIs, ensure Oko is connected:
@@ -29,7 +49,7 @@ Before using any browser APIs, ensure Oko is connected:
 
 Before making browser API calls, verify the extension is connected:
 ```bash
-curl -H "X-Auth-Token: $TOKEN" "http://localhost:8129/api/browser/tabs"
+npm run oko -- doctor
 ```
 If you get `503 No extension connected`, ask the user to:
 - Open the Oko extension popup in Chrome
@@ -46,6 +66,7 @@ Backend:
 In Ona environments, the backend automatically outputs the extension config (URL + token) on startup.
 
 Extension:
+- `npm run build:shared` (from repo root)
 - `cd extension`
 - `npm install`
 - `npm run build`
@@ -72,10 +93,10 @@ Extension:
 ### Core workflows
 
 - Element picker: press `Alt+Shift+A`, click an element, then use the backend API to read `/api/browser/selected-element`.
-- Network capture (headers only): call `/api/browser/network/enable`, then `/api/browser/network/requests` to read results.
-- Network capture (with response bodies): use the debugger API - see below.
-- Element actions: call `/api/browser/element-info`, `/api/browser/click`, or `/api/browser/fill`.
-- Screenshots: call `/api/browser/screenshot` (use `fullPage=true` when needed).
+- Network capture (headers + bodies): `npm run oko -- capture api --mode full --url-pattern api`.
+- Element actions: `npm run oko -- browser click` and `npm run oko -- browser fill`.
+- Screenshots: `npm run oko -- browser screenshot --tab-id <id> --full-page`.
+- Low-level API passthrough: `npm run oko -- api get|post|delete ...`.
 
 ### Debugger-based network capture (with response bodies)
 
@@ -122,11 +143,10 @@ curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
 ## Common Tasks
 
 ### Capture API traffic from a website
-1. Get tab ID: `GET /api/browser/tabs` - find the target tab
-2. Enable debugger: `POST /api/browser/debugger/enable` with `{"tabId": <id>}`
+1. `npm run oko -- tabs list` (optional if you need exact tab ID)
+2. `npm run oko -- capture api --active --mode full --url-pattern api --until-enter`
 3. Ask user to interact with the website
-4. Fetch requests: `GET /api/browser/debugger/requests?tabId=<id>&urlPattern=api&limit=100`
-5. Disable debugger: `POST /api/browser/debugger/disable` with `{"tabId": <id>}`
+4. Press Enter to stop capture (CLI disables debugger automatically)
 
 ### Take a screenshot
 ```bash

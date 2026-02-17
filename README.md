@@ -1,6 +1,6 @@
 # Oko
 
-Oko is a Chrome extension + backend that lets you automate and inspect your browser from a development environment. Control tabs, capture network traffic, click elements, fill forms, and take screenshots - all via REST API.
+Oko is a Chrome extension + backend that lets you automate and inspect your browser from a development environment. Control tabs, capture network traffic, click elements, fill forms, and take screenshots via an agent-first CLI or the raw REST API.
 
 ## Features
 
@@ -46,6 +46,34 @@ Token: <generated-token>
 
 **Manual setup:**
 Open the Oko extension popup, paste the URL and token separately, click **Test** then **Save**.
+
+## CLI (Recommended for agents)
+
+The CLI wraps auth headers, retries, and debugger lifecycle cleanup.
+
+```bash
+# Health + extension connectivity
+npm run oko -- doctor
+
+# List tabs
+npm run oko -- tabs list
+
+# Capture API traffic from active tab (10s default window)
+npm run oko -- capture api --mode full --url-pattern api
+
+# Capture until Enter and write to file
+npm run oko -- capture api --until-enter --out capture.json
+
+# Low-level passthrough if needed
+npm run oko -- api get /api/browser/tabs
+```
+
+Global options:
+- `--url <url>` (default: `http://localhost:8129`)
+- `--token <token>`
+- `--connection-code <oko:...>`
+- `--timeout-ms <n>`
+- `--output json|ndjson|text`
 
 ## API Reference
 
@@ -127,6 +155,7 @@ POST /api/browser/debugger/disable
 
 ```
 Oko/
+├── cli/               # Agent-first Node CLI
 ├── backend/
 │   ├── server.js      # Express + WebSocket server
 │   └── package.json
@@ -135,7 +164,7 @@ Oko/
 │   │   ├── websocket.ts      # WebSocket connection handling
 │   │   ├── browserMcp/       # Browser automation handlers
 │   │   └── __tests__/        # Vitest test suite
-│   ├── background.js  # Bundled service worker
+│   ├── dist/          # Built popup/background scripts
 │   ├── picker.js      # Element picker overlay
 │   ├── popup.html/js  # Extension popup UI
 │   └── manifest.json
@@ -149,9 +178,12 @@ Oko/
 ### Extension
 
 ```bash
+# from repo root (required once per fresh clone)
+npm run build:shared
+
 cd extension
 npm install
-npm run build      # Build TypeScript to background.js
+npm run build      # Build background + popup bundles to dist/
 npm run typecheck  # Type checking
 npm run lint       # ESLint
 npm test           # Run vitest tests
@@ -163,6 +195,17 @@ npm test           # Run vitest tests
 cd backend
 npm install
 npm start          # Start server on port 8129
+```
+
+### CLI
+
+```bash
+cd cli
+npm install
+npm test
+
+# from repo root
+npm run oko -- --help
 ```
 
 ## Security

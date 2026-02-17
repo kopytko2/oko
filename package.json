@@ -7,9 +7,11 @@
     "build": "npm run build:shared && npm run build:extension",
     "build:shared": "cd shared && npm run build",
     "build:extension": "cd extension && npm run build",
+    "oko": "npm run build:shared --silent && node cli/index.js",
     "test": "npm run test:backend && npm run test:extension",
     "test:backend": "cd backend && npm test",
     "test:extension": "cd extension && npm test",
+    "test:cli": "cd cli && npm test",
     "test:e2e": "cd extension && npm run test:e2e",
     "typecheck": "npm run typecheck:shared && npm run typecheck:extension",
     "typecheck:shared": "cd shared && npm run typecheck",
@@ -19,6 +21,7 @@
     "ci": "npm run check && npm run test:e2e"
   },
   "workspaces": [
+    "cli",
     "shared",
     "backend",
     "extension"

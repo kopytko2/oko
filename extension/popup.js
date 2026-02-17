@@ -1,3 +1,5 @@
+import { parseConnectionCode as parseSharedConnectionCode } from '@oko/shared'
+
 const backendUrlInput = document.getElementById('backendUrl')
 const authTokenInput = document.getElementById('authToken')
 const testBtn = document.getElementById('testBtn')
@@ -75,29 +77,6 @@ function showStatus(type, message) {
 // =============================================================================
 
 /**
- * Parse connection code format: oko:BASE64(url|token)
- */
-function parseConnectionCode(text) {
-  const trimmed = text.trim()
-  if (!trimmed.startsWith('oko:')) return null
-  
-  try {
-    const base64 = trimmed.slice(4)
-    const decoded = atob(base64)
-    const pipeIndex = decoded.indexOf('|')
-    if (pipeIndex === -1) return null
-    
-    const url = decoded.slice(0, pipeIndex)
-    const token = decoded.slice(pipeIndex + 1)
-    
-    if (!url || !token) return null
-    return { url, token }
-  } catch {
-    return null
-  }
-}
-
-/**
  * Parse config text to extract URL and token
  * Supports: connection code, JSON, key-value pairs, raw URL+token
  */
@@ -107,7 +86,7 @@ function parseConfig(text) {
   if (!text || !text.trim()) return result
   
   // Try connection code format first (oko:BASE64)
-  const codeResult = parseConnectionCode(text)
+  const codeResult = parseSharedConnectionCode(text)
   if (codeResult) {
     return codeResult
   }

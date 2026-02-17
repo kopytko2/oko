@@ -4,7 +4,7 @@
   "description": "Oko Chrome extension for browser automation",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "npm --prefix ../shared run build && vite build",
     "dev": "vite build --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
