@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Oko WebSocket message types - shared between backend and extension",
-  "version": "1.1.0",
+  "version": "1.2.0",
   
   "browserRequests": {
     "browser-list-tabs": {
@@ -64,6 +64,11 @@
       "request": { "tabId?": "number", "selector?": "string", "visible?": "boolean", "enabled?": "boolean", "textContains?": "string", "valueEquals?": "string", "urlIncludes?": "string" },
       "response": { "passed": "boolean", "details": "object" }
     },
+    "browser-list-interactables": {
+      "description": "List actionable interactable elements from a tab DOM",
+      "request": { "tabId?": "number", "rootSelector?": "string", "maxNodes?": "number", "includeHidden?": "boolean" },
+      "response": { "items": "InteractableNode[]" }
+    },
     "browser-enable-network-capture": {
       "description": "Enable network request capture",
       "request": { "tabId?": "number", "urlFilter?": "string[]" },
@@ -91,13 +96,18 @@
     },
     "browser-get-debugger-requests": {
       "description": "Get debugger-captured requests with response bodies",
-      "request": { "tabId": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number" },
-      "response": { "requests": "DebuggerRequest[]" }
+      "request": { "tabId": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number", "sinceTs?": "number", "untilTs?": "number", "markerId?": "string", "includeMarkers?": "boolean", "includeInitiator?": "boolean", "includeFrame?": "boolean" },
+      "response": { "requests": "DebuggerRequest[]", "markers?": "DebuggerMarker[]" }
     },
     "browser-clear-debugger-requests": {
       "description": "Clear debugger-captured requests",
       "request": { "tabId": "number" },
       "response": {}
+    },
+    "browser-debugger-mark": {
+      "description": "Create a marker in debugger session for action/phase correlation",
+      "request": { "tabId": "number", "markerType": "\"phase\"|\"action-start\"|\"action-end\"", "label": "string", "meta?": "object" },
+      "response": { "marker": "DebuggerMarker" }
     }
   },
   

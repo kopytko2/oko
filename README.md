@@ -76,6 +76,9 @@ npm run oko -- browser assert --tab-id 123 --selector "h1" --text-contains "Dash
 # Run declarative frontend scenario
 npm run oko -- test run docs/examples/login-scenario.yaml --strict
 
+# Autonomous API discovery from active logged-in tab
+npm run oko -- discover api --active
+
 # Low-level passthrough if needed
 npm run oko -- api get /api/browser/tabs
 ```
@@ -86,6 +89,9 @@ Global options:
 - `--connection-code <oko:...>`
 - `--timeout-ms <n>`
 - `--output json|ndjson|text`
+
+Autonomous discovery:
+- `discover api` performs guardrailed step-by-step interaction + capture and writes a replay pack to `./.oko/discovery/<timestamp>` by default.
 
 Scenario schema and examples: `docs/testing-scenarios.md`, `docs/examples/login-scenario.yaml`.
 

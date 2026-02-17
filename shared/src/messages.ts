@@ -16,7 +16,7 @@ import { z } from 'zod'
  * Protocol version for compatibility checking.
  * Increment MAJOR for breaking changes, MINOR for additions, PATCH for fixes.
  */
-export const PROTOCOL_VERSION = '1.1.0'
+export const PROTOCOL_VERSION = '1.2.0'
 
 export const ProtocolVersionSchema = z.object({
   major: z.number(),
@@ -72,10 +72,35 @@ export const ElementInfoSchema = z.object({
   childCount: z.number().optional(),
 })
 
+export const InteractableNodeSchema = z.object({
+  selector: z.string(),
+  role: z.string().optional(),
+  tag: z.string(),
+  type: z.string().optional(),
+  text: z.string().optional(),
+  ariaLabel: z.string().optional(),
+  href: z.string().optional(),
+  visible: z.boolean(),
+  enabled: z.boolean(),
+  bounds: z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+  }).optional(),
+  formContext: z.object({
+    action: z.string().optional(),
+    method: z.string().optional(),
+  }).optional(),
+  riskHints: z.array(z.string()).optional(),
+})
+
 export const NetworkRequestSchema = z.object({
+  requestId: z.string().optional(),
   url: z.string(),
   method: z.string(),
   status: z.number().optional(),
+  statusCode: z.number().optional(),
   statusText: z.string().optional(),
   requestHeaders: z.record(z.string()).optional(),
   responseHeaders: z.record(z.string()).optional(),
@@ -84,6 +109,11 @@ export const NetworkRequestSchema = z.object({
   timestamp: z.number().optional(),
   duration: z.number().optional(),
   resourceType: z.string().optional(),
+  initiator: z.record(z.unknown()).optional(),
+  documentURL: z.string().optional(),
+  frameId: z.string().optional(),
+  markerRefs: z.array(z.string()).optional(),
+  requestFingerprint: z.string().optional(),
 })
 
 // =============================================================================
@@ -196,6 +226,15 @@ export const BrowserAssertRequest = z.object({
   urlIncludes: z.string().optional(),
 })
 
+export const BrowserListInteractablesRequest = z.object({
+  type: z.literal('browser-list-interactables'),
+  requestId: z.string(),
+  tabId: z.number().optional(),
+  rootSelector: z.string().optional(),
+  maxNodes: z.number().optional(),
+  includeHidden: z.boolean().optional(),
+})
+
 export const BrowserEnableNetworkCaptureRequest = z.object({
   type: z.literal('browser-enable-network-capture'),
   requestId: z.string(),
@@ -241,12 +280,27 @@ export const BrowserGetDebuggerRequestsRequest = z.object({
   resourceType: z.string().optional(),
   limit: z.number().optional(),
   offset: z.number().optional(),
+  sinceTs: z.number().optional(),
+  untilTs: z.number().optional(),
+  markerId: z.string().optional(),
+  includeMarkers: z.boolean().optional(),
+  includeInitiator: z.boolean().optional(),
+  includeFrame: z.boolean().optional(),
 })
 
 export const BrowserClearDebuggerRequestsRequest = z.object({
   type: z.literal('browser-clear-debugger-requests'),
   requestId: z.string(),
   tabId: z.number(),
+})
+
+export const BrowserDebuggerMarkRequest = z.object({
+  type: z.literal('browser-debugger-mark'),
+  requestId: z.string(),
+  tabId: z.number(),
+  markerType: z.enum(['phase', 'action-start', 'action-end']),
+  label: z.string(),
+  meta: z.record(z.unknown()).optional(),
 })
 
 // Union of all browser requests
@@ -263,6 +317,7 @@ export const BrowserRequest = z.discriminatedUnion('type', [
   BrowserScrollRequest,
   BrowserWaitRequest,
   BrowserAssertRequest,
+  BrowserListInteractablesRequest,
   BrowserEnableNetworkCaptureRequest,
   BrowserDisableNetworkCaptureRequest,
   BrowserGetNetworkRequestsRequest,
@@ -270,6 +325,7 @@ export const BrowserRequest = z.discriminatedUnion('type', [
   BrowserDisableDebuggerCaptureRequest,
   BrowserGetDebuggerRequestsRequest,
   BrowserClearDebuggerRequestsRequest,
+  BrowserDebuggerMarkRequest,
 ])
 
 // =============================================================================
@@ -368,6 +424,14 @@ export const BrowserAssertResponse = z.object({
   error: z.string().optional(),
 })
 
+export const BrowserListInteractablesResponse = z.object({
+  type: z.literal('browser-list-interactables-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  items: z.array(InteractableNodeSchema).optional(),
+  error: z.string().optional(),
+})
+
 export const BrowserNetworkCaptureResponse = z.object({
   type: z.literal('browser-enable-network-capture-result'),
   requestId: z.string(),
@@ -409,6 +473,16 @@ export const BrowserGetDebuggerRequestsResponse = z.object({
   requestId: z.string(),
   success: z.boolean(),
   requests: z.array(NetworkRequestSchema).optional(),
+  markers: z.array(z.object({
+    id: z.string(),
+    ts: z.number(),
+    markerType: z.enum(['phase', 'action-start', 'action-end']),
+    label: z.string(),
+    meta: z.record(z.unknown()).optional(),
+  })).optional(),
+  total: z.number().optional(),
+  limit: z.number().optional(),
+  offset: z.number().optional(),
   error: z.string().optional(),
 })
 
@@ -416,6 +490,20 @@ export const BrowserClearDebuggerRequestsResponse = z.object({
   type: z.literal('browser-clear-debugger-requests-result'),
   requestId: z.string(),
   success: z.boolean(),
+  error: z.string().optional(),
+})
+
+export const BrowserDebuggerMarkResponse = z.object({
+  type: z.literal('browser-debugger-mark-result'),
+  requestId: z.string(),
+  success: z.boolean(),
+  marker: z.object({
+    id: z.string(),
+    ts: z.number(),
+    markerType: z.enum(['phase', 'action-start', 'action-end']),
+    label: z.string(),
+    meta: z.record(z.unknown()).optional(),
+  }).optional(),
   error: z.string().optional(),
 })
 
@@ -433,6 +521,7 @@ export const BrowserResponse = z.discriminatedUnion('type', [
   BrowserScrollResponse,
   BrowserWaitResponse,
   BrowserAssertResponse,
+  BrowserListInteractablesResponse,
   BrowserNetworkCaptureResponse,
   BrowserDisableNetworkCaptureResponse,
   BrowserGetNetworkRequestsResponse,
@@ -440,6 +529,7 @@ export const BrowserResponse = z.discriminatedUnion('type', [
   BrowserDisableDebuggerCaptureResponse,
   BrowserGetDebuggerRequestsResponse,
   BrowserClearDebuggerRequestsResponse,
+  BrowserDebuggerMarkResponse,
 ])
 
 // =============================================================================
@@ -490,6 +580,7 @@ export const ExtensionMessage = z.discriminatedUnion('type', [
 
 export type Tab = z.infer<typeof TabSchema>
 export type ElementInfo = z.infer<typeof ElementInfoSchema>
+export type InteractableNode = z.infer<typeof InteractableNodeSchema>
 export type NetworkRequest = z.infer<typeof NetworkRequestSchema>
 
 export type BrowserRequestType = z.infer<typeof BrowserRequest>
@@ -519,6 +610,7 @@ export const BROWSER_REQUEST_TYPES = [
   'browser-scroll',
   'browser-wait',
   'browser-assert',
+  'browser-list-interactables',
   'browser-enable-network-capture',
   'browser-disable-network-capture',
   'browser-get-network-requests',
@@ -526,6 +618,7 @@ export const BROWSER_REQUEST_TYPES = [
   'browser-disable-debugger-capture',
   'browser-get-debugger-requests',
   'browser-clear-debugger-requests',
+  'browser-debugger-mark',
 ] as const
 
 export type BrowserRequestTypeName = typeof BROWSER_REQUEST_TYPES[number]

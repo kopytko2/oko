@@ -3,6 +3,7 @@ import {
   parseCaptureApiOptions,
   parseBrowserAssertOptions,
   parseBrowserWaitOptions,
+  parseDiscoverApiOptions,
   parseCommand,
   parseTestRunOptions,
 } from '../argparse.js'
@@ -78,5 +79,40 @@ describe('command argument validation', () => {
 
   it('validates test run path requirement', () => {
     expect(() => parseTestRunOptions([])).toThrow(/scenario file path/i)
+  })
+
+  it('parses discover api command with defaults', () => {
+    const parsed = parseCommand(['discover', 'api'])
+    expect(parsed.key).toBe('discover.api')
+    expect(parsed.options.active).toBe(true)
+    expect(parsed.options.scope).toBe('first-party')
+    expect(parsed.options.budgetMin).toBe(8)
+    expect(parsed.options.maxActions).toBe(80)
+  })
+
+  it('parses discover api command options', () => {
+    const options = parseDiscoverApiOptions([
+      '--tab-id', '5',
+      '--budget-min', '4',
+      '--max-actions', '30',
+      '--scope', 'origin',
+      '--output-dir', '/tmp/out',
+      '--allow-phase2', 'false',
+      '--seed-path', '/dashboard',
+      '--include-host', 'api\\\\.example\\\\.com',
+      '--exclude-host', 'analytics',
+    ])
+
+    expect(options).toMatchObject({
+      tabId: 5,
+      budgetMin: 4,
+      maxActions: 30,
+      scope: 'origin',
+      outputDir: '/tmp/out',
+      allowPhase2: false,
+      seedPath: '/dashboard',
+    })
+    expect(options.includeHost).toEqual(['api\\\\.example\\\\.com'])
+    expect(options.excludeHost).toEqual(['analytics'])
   })
 })

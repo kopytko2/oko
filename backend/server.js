@@ -390,15 +390,52 @@ app.get('/api/browser/debugger/requests', async (req, res) => {
 
   const urlPattern = typeof query.urlPattern === 'string' ? query.urlPattern : undefined
   const resourceType = typeof query.resourceType === 'string' ? query.resourceType : undefined
-  const limit = parseInteger(query.limit) || 50
-  const offset = parseInteger(query.offset) || 0
+  const limitParsed = parseInteger(query.limit)
+  const offsetParsed = parseInteger(query.offset)
+  const limit = limitParsed ?? 50
+  const offset = offsetParsed ?? 0
+  const sinceTs = query.sinceTs === undefined ? undefined : parseInteger(query.sinceTs)
+  const untilTs = query.untilTs === undefined ? undefined : parseInteger(query.untilTs)
+  const markerId = typeof query.markerId === 'string' ? query.markerId : undefined
+
+  const parseBool = (value) => {
+    if (value === undefined) return undefined
+    if (value === true || value === 'true' || value === '1') return true
+    if (value === false || value === 'false' || value === '0') return false
+    return null
+  }
+  const includeMarkers = parseBool(query.includeMarkers)
+  const includeInitiator = parseBool(query.includeInitiator)
+  const includeFrame = parseBool(query.includeFrame)
+
+  if (query.limit !== undefined && (limitParsed === null || limit < 1 || limit > 5000)) {
+    return res.status(400).json({ success: false, error: 'limit must be an integer between 1 and 5000' })
+  }
+  if (query.offset !== undefined && (offsetParsed === null || offset < 0)) {
+    return res.status(400).json({ success: false, error: 'offset must be a non-negative integer' })
+  }
+  if (sinceTs === null || untilTs === null) {
+    return res.status(400).json({ success: false, error: 'sinceTs and untilTs must be integers' })
+  }
+  if (sinceTs !== undefined && untilTs !== undefined && sinceTs > untilTs) {
+    return res.status(400).json({ success: false, error: 'sinceTs must be less than or equal to untilTs' })
+  }
+  if (includeMarkers === null || includeInitiator === null || includeFrame === null) {
+    return res.status(400).json({ success: false, error: 'includeMarkers/includeInitiator/includeFrame must be boolean values' })
+  }
 
   sendToExtension(req, res, 'browser-get-debugger-requests', {
     tabId,
     urlPattern,
     resourceType,
     limit,
-    offset
+    offset,
+    sinceTs: sinceTs === null ? undefined : sinceTs,
+    untilTs: untilTs === null ? undefined : untilTs,
+    markerId,
+    includeMarkers: includeMarkers === null ? undefined : includeMarkers,
+    includeInitiator: includeInitiator === null ? undefined : includeInitiator,
+    includeFrame: includeFrame === null ? undefined : includeFrame,
   })
 })
 
@@ -410,6 +447,39 @@ app.delete('/api/browser/debugger/requests', async (req, res) => {
   }
 
   sendToExtension(req, res, 'browser-clear-debugger-requests', { tabId })
+})
+
+app.post('/api/browser/debugger/mark', async (req, res) => {
+  const body = req.body || {}
+  const tabId = parseInteger(body.tabId)
+  if (tabId === null || tabId < 0) {
+    return res.status(400).json({ success: false, error: 'tabId is required and must be a non-negative integer' })
+  }
+
+  const markerType = parseString(body.markerType, 32)
+  if (!markerType || !['phase', 'action-start', 'action-end'].includes(markerType)) {
+    return res.status(400).json({ success: false, error: "markerType must be 'phase', 'action-start', or 'action-end'" })
+  }
+
+  const label = parseString(body.label, 256)
+  if (!label) {
+    return res.status(400).json({ success: false, error: 'label is required' })
+  }
+
+  let meta
+  if (body.meta !== undefined) {
+    if (typeof body.meta !== 'object' || body.meta === null || Array.isArray(body.meta)) {
+      return res.status(400).json({ success: false, error: 'meta must be an object' })
+    }
+    meta = body.meta
+  }
+
+  sendToExtension(req, res, 'browser-debugger-mark', {
+    tabId,
+    markerType,
+    label,
+    meta,
+  })
 })
 
 app.post('/api/browser/element-info', async (req, res) => {
@@ -437,6 +507,48 @@ app.post('/api/browser/element-info', async (req, res) => {
     tabId,
     selector,
     includeStyles
+  })
+})
+
+app.post('/api/browser/interactables', async (req, res) => {
+  const body = req.body || {}
+
+  const tabIdValue = body.tabId
+  const tabId = parseInteger(tabIdValue)
+  if (tabIdValue !== undefined && (tabId === null || tabId < 0)) {
+    return res.status(400).json({ success: false, error: 'tabId must be a non-negative integer' })
+  }
+
+  let rootSelector
+  if (body.rootSelector !== undefined) {
+    rootSelector = parseString(body.rootSelector, 1000)
+    if (!rootSelector) {
+      return res.status(400).json({ success: false, error: 'rootSelector must be a non-empty string' })
+    }
+  }
+
+  let maxNodes = 300
+  if (body.maxNodes !== undefined) {
+    const parsed = parseInteger(body.maxNodes)
+    if (parsed === null || parsed < 1 || parsed > 5000) {
+      return res.status(400).json({ success: false, error: 'maxNodes must be an integer between 1 and 5000' })
+    }
+    maxNodes = parsed
+  }
+
+  let includeHidden = false
+  if (body.includeHidden !== undefined) {
+    if (typeof body.includeHidden !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'includeHidden must be a boolean' })
+    }
+    includeHidden = body.includeHidden
+  }
+
+  sendToExtension(req, res, 'browser-list-interactables', {
+    tabId,
+    rootSelector,
+    maxNodes,
+    includeHidden,
   })
 })
 

@@ -21,6 +21,7 @@ import {
 } from './commands/browser.js'
 import { runApiCall } from './commands/api.js'
 import { runTestScenario } from './commands/test.js'
+import { runDiscoverApi } from './commands/discover.js'
 
 export async function runCli(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin }) {
   try {
@@ -47,6 +48,10 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
       }
       case 'capture.api': {
         data = await runCaptureApi({ client, options: parsed.options, output: config.output, io })
+        break
+      }
+      case 'discover.api': {
+        data = await runDiscoverApi({ client, options: parsed.options, config, io })
         break
       }
       case 'browser.screenshot': {

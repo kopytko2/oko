@@ -39,6 +39,9 @@ npm run oko -- browser assert --tab-id 123 --selector "h1" --text-contains "Dash
 
 # Declarative scenario run
 npm run oko -- test run docs/examples/login-scenario.yaml --strict
+
+# Autonomous API discovery from active logged-in tab
+npm run oko -- discover api --active
 ```
 
 Use REST/curl only when you need low-level control.
@@ -110,6 +113,7 @@ Extension:
 - Human-like interactions: `npm run oko -- browser hover|type|key|scroll|wait|assert`.
 - Screenshots: `npm run oko -- browser screenshot --tab-id <id> --full-page`.
 - Scenario runner: `npm run oko -- test run <scenario.yaml> [--strict]`.
+- API discovery runner: `npm run oko -- discover api [--active]`.
 - Scenario docs: `docs/testing-scenarios.md`.
 - Low-level API passthrough: `npm run oko -- api get|post|delete ...`.
 

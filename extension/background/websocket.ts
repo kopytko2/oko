@@ -13,6 +13,7 @@ import {
 import { getConnection, buildUrl } from '../lib/api'
 import {
   handleGetElementInfo,
+  handleListInteractables,
   handleClickElement,
   handleFillInput,
   handleHoverElement,
@@ -32,7 +33,8 @@ import {
   handleEnableDebuggerCapture,
   handleDisableDebuggerCapture,
   handleGetDebuggerRequests,
-  handleClearDebuggerRequests
+  handleClearDebuggerRequests,
+  handleDebuggerMark
 } from './browserMcp/debugger'
 import {
   safeParseBrowserRequest,
@@ -465,6 +467,11 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
         await handleGetElementInfo(message as unknown as Parameters<typeof handleGetElementInfo>[0])
         break
       }
+
+      case 'browser-list-interactables': {
+        await handleListInteractables(message as unknown as Parameters<typeof handleListInteractables>[0])
+        break
+      }
       
       case 'browser-click-element': {
         await handleClickElement(message as unknown as Parameters<typeof handleClickElement>[0])
@@ -545,6 +552,11 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
       
       case 'browser-clear-debugger-requests': {
         handleClearDebuggerRequests(message as unknown as Parameters<typeof handleClearDebuggerRequests>[0])
+        break
+      }
+
+      case 'browser-debugger-mark': {
+        handleDebuggerMark(message as unknown as Parameters<typeof handleDebuggerMark>[0])
         break
       }
       

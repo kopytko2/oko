@@ -80,9 +80,11 @@ describe('Oko Backend Routes', () => {
       { method: 'get', path: '/api/browser/network/requests' },
       { method: 'post', path: '/api/browser/debugger/enable' },
       { method: 'post', path: '/api/browser/debugger/disable' },
+      { method: 'post', path: '/api/browser/debugger/mark' },
       { method: 'get', path: '/api/browser/debugger/requests' },
       { method: 'delete', path: '/api/browser/debugger/requests' },
       { method: 'post', path: '/api/browser/element-info' },
+      { method: 'post', path: '/api/browser/interactables' },
       { method: 'post', path: '/api/browser/click' },
       { method: 'post', path: '/api/browser/fill' },
       { method: 'post', path: '/api/browser/hover' },
@@ -134,7 +136,9 @@ describe('Oko Backend Routes', () => {
       { method: 'post', path: '/api/browser/network/enable', body: {} },
       { method: 'post', path: '/api/browser/network/disable', body: {} },
       { method: 'get', path: '/api/browser/network/requests' },
+      { method: 'post', path: '/api/browser/debugger/mark', body: { tabId: 1, markerType: 'phase', label: 'phase-1' } },
       { method: 'post', path: '/api/browser/element-info', body: { selector: 'h1' } },
+      { method: 'post', path: '/api/browser/interactables', body: {} },
       { method: 'post', path: '/api/browser/click', body: { selector: 'button' } },
       { method: 'post', path: '/api/browser/fill', body: { selector: 'input', value: 'test' } },
       { method: 'post', path: '/api/browser/hover', body: { selector: 'button' } },
@@ -245,6 +249,28 @@ describe('Oko Backend Routes', () => {
       })
     })
 
+    describe('POST /api/browser/debugger/mark', () => {
+      it('requires tabId parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/debugger/mark')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ markerType: 'phase', label: 'phase-1' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('requires valid markerType', async () => {
+        const res = await request(app)
+          .post('/api/browser/debugger/mark')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ tabId: 1, markerType: 'invalid', label: 'phase-1' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/markerType/i)
+      })
+    })
+
     describe('GET /api/browser/debugger/requests', () => {
       it('requires tabId parameter', async () => {
         const res = await request(app)
@@ -262,6 +288,24 @@ describe('Oko Backend Routes', () => {
         
         expect(res.status).toBe(400)
         expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('rejects invalid includeMarkers value', async () => {
+        const res = await request(app)
+          .get('/api/browser/debugger/requests?tabId=1&includeMarkers=maybe')
+          .set('X-Auth-Token', AUTH_TOKEN)
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/includeMarkers/i)
+      })
+
+      it('rejects invalid timestamp range', async () => {
+        const res = await request(app)
+          .get('/api/browser/debugger/requests?tabId=1&sinceTs=100&untilTs=50')
+          .set('X-Auth-Token', AUTH_TOKEN)
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/sinceTs/i)
       })
     })
 
@@ -305,6 +349,28 @@ describe('Oko Backend Routes', () => {
         
         expect(res.status).toBe(400)
         expect(res.body.error).toMatch(/tabId/i)
+      })
+    })
+
+    describe('POST /api/browser/interactables', () => {
+      it('rejects invalid tabId', async () => {
+        const res = await request(app)
+          .post('/api/browser/interactables')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ tabId: 'invalid' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('rejects invalid maxNodes', async () => {
+        const res = await request(app)
+          .post('/api/browser/interactables')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ maxNodes: -1 })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/maxNodes/i)
       })
     })
 
@@ -676,9 +742,11 @@ describe('Oko Backend Routes', () => {
       { method: 'get', path: '/api/browser/network/requests' },
       { method: 'post', path: '/api/browser/debugger/enable' },
       { method: 'post', path: '/api/browser/debugger/disable' },
+      { method: 'post', path: '/api/browser/debugger/mark' },
       { method: 'get', path: '/api/browser/debugger/requests' },
       { method: 'delete', path: '/api/browser/debugger/requests' },
       { method: 'post', path: '/api/browser/element-info' },
+      { method: 'post', path: '/api/browser/interactables' },
       { method: 'post', path: '/api/browser/click' },
       { method: 'post', path: '/api/browser/fill' },
       { method: 'post', path: '/api/browser/hover' },

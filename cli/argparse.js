@@ -106,6 +106,10 @@ export function parseCommand(commandArgs) {
     return { key: 'capture.api', options: parseCaptureApiOptions(rest) }
   }
 
+  if (group === 'discover' && action === 'api') {
+    return { key: 'discover.api', options: parseDiscoverApiOptions(rest) }
+  }
+
   if (group === 'browser') {
     if (action === 'screenshot') return { key: 'browser.screenshot', options: parseBrowserScreenshotOptions(rest) }
     if (action === 'click') return { key: 'browser.click', options: parseBrowserClickOptions(rest) }
@@ -218,6 +222,84 @@ export function parseCaptureApiOptions(args) {
 
   if (options.duration === undefined && !options.untilEnter) {
     options.duration = 10
+  }
+
+  return options
+}
+
+export function parseDiscoverApiOptions(args) {
+  const options = {
+    tabId: undefined,
+    tabUrl: undefined,
+    active: false,
+    budgetMin: 8,
+    maxActions: 80,
+    scope: 'first-party',
+    outputDir: undefined,
+    allowPhase2: true,
+    seedPath: undefined,
+    format: 'json',
+    includeHost: [],
+    excludeHost: [],
+  }
+
+  for (let i = 0; i < args.length; ) {
+    const token = args[i]
+    if (token === '--active') {
+      options.active = true
+      i += 1
+      continue
+    }
+
+    if (
+      token.startsWith('--tab-id') ||
+      token.startsWith('--tab-url') ||
+      token.startsWith('--budget-min') ||
+      token.startsWith('--max-actions') ||
+      token.startsWith('--scope') ||
+      token.startsWith('--output-dir') ||
+      token.startsWith('--allow-phase2') ||
+      token.startsWith('--seed-path') ||
+      token.startsWith('--format') ||
+      token.startsWith('--include-host') ||
+      token.startsWith('--exclude-host')
+    ) {
+      const flag = token.split('=')[0]
+      const { value, consumed } = readOptionValue(args, i, flag)
+
+      if (flag === '--tab-id') options.tabId = parsePositiveInteger(value, '--tab-id')
+      else if (flag === '--tab-url') options.tabUrl = value
+      else if (flag === '--budget-min') options.budgetMin = parsePositiveNumber(value, '--budget-min')
+      else if (flag === '--max-actions') options.maxActions = parsePositiveInteger(value, '--max-actions')
+      else if (flag === '--scope') {
+        if (!['first-party', 'origin', 'all'].includes(value)) {
+          throw new UsageError("--scope must be 'first-party', 'origin', or 'all'")
+        }
+        options.scope = value
+      } else if (flag === '--output-dir') options.outputDir = value
+      else if (flag === '--allow-phase2') options.allowPhase2 = parseBoolean(value, '--allow-phase2')
+      else if (flag === '--seed-path') options.seedPath = value
+      else if (flag === '--format') {
+        if (!['json', 'ndjson'].includes(value)) {
+          throw new UsageError("--format must be 'json' or 'ndjson'")
+        }
+        options.format = value
+      } else if (flag === '--include-host') options.includeHost.push(value)
+      else if (flag === '--exclude-host') options.excludeHost.push(value)
+
+      i += consumed
+      continue
+    }
+
+    throw new UsageError(`Unknown discover option: ${token}`)
+  }
+
+  const selectors = [options.tabId !== undefined, !!options.tabUrl, options.active].filter(Boolean).length
+  if (selectors > 1) {
+    throw new UsageError('Choose only one of --tab-id, --tab-url, or --active')
+  }
+  if (selectors === 0) {
+    options.active = true
   }
 
   return options
@@ -735,5 +817,5 @@ export function parseLowLevelApiOptions(method, args) {
 }
 
 export function getHelpText() {
-  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--follow]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS [--mode human|native]\n  browser fill --tab-id N --selector CSS --value TEXT\n  browser hover --tab-id N --selector CSS\n  browser type --tab-id N --selector CSS --text TEXT [--clear] [--delay-ms N]\n  browser key --tab-id N --key KEY [--mod MODIFIER]\n  browser scroll --tab-id N [--selector CSS] [--delta-x N] [--delta-y N] [--to top|bottom] [--behavior auto|smooth]\n  browser wait --tab-id N --condition element|url [--selector CSS] [--state present|visible|hidden] [--url-includes TEXT] [--timeout-ms N] [--poll-ms N]\n  browser assert --tab-id N [--selector CSS] [--visible true|false] [--enabled true|false] [--text-contains TEXT] [--value-equals TEXT] [--url-includes TEXT]\n  test run <scenario.yaml> [--tab-id N] [--strict]\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n  - --follow streams requests as NDJSON lines in real time\n`
+  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  discover api [--tab-id N | --tab-url REGEX | --active]\n               [--budget-min 8] [--max-actions 80]\n               [--scope first-party|origin|all]\n               [--output-dir PATH] [--allow-phase2 true|false]\n               [--seed-path /foo] [--format json|ndjson]\n               [--include-host REGEX] [--exclude-host REGEX]\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--follow]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS [--mode human|native]\n  browser fill --tab-id N --selector CSS --value TEXT\n  browser hover --tab-id N --selector CSS\n  browser type --tab-id N --selector CSS --text TEXT [--clear] [--delay-ms N]\n  browser key --tab-id N --key KEY [--mod MODIFIER]\n  browser scroll --tab-id N [--selector CSS] [--delta-x N] [--delta-y N] [--to top|bottom] [--behavior auto|smooth]\n  browser wait --tab-id N --condition element|url [--selector CSS] [--state present|visible|hidden] [--url-includes TEXT] [--timeout-ms N] [--poll-ms N]\n  browser assert --tab-id N [--selector CSS] [--visible true|false] [--enabled true|false] [--text-contains TEXT] [--value-equals TEXT] [--url-includes TEXT]\n  test run <scenario.yaml> [--tab-id N] [--strict]\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - discover api runs autonomous two-phase exploration with policy-based safety guardrails\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n  - --follow streams requests as NDJSON lines in real time\n`
 }

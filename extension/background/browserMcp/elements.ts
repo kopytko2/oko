@@ -47,6 +47,29 @@ interface AssertResult extends InteractionResult {
   details: Record<string, unknown>
 }
 
+interface InteractableNode {
+  selector: string
+  role?: string
+  tag: string
+  type?: string
+  text?: string
+  ariaLabel?: string
+  href?: string
+  visible: boolean
+  enabled: boolean
+  bounds?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+  formContext?: {
+    action?: string
+    method?: string
+  }
+  riskHints?: string[]
+}
+
 interface GetElementInfoMessage {
   requestId: string
   tabId?: number
@@ -121,6 +144,14 @@ interface AssertMessage {
   textContains?: string
   valueEquals?: string
   urlIncludes?: string
+}
+
+interface ListInteractablesMessage {
+  requestId: string
+  tabId?: number
+  rootSelector?: string
+  maxNodes?: number
+  includeHidden?: boolean
 }
 
 // =============================================================================
@@ -231,6 +262,128 @@ function getElementInfoScript(selector: string, includeStyles: boolean, stylePro
     isVisible,
     childCount: element.children.length
   }
+}
+
+function listInteractablesScript(rootSelector: string | undefined, maxNodes: number, includeHidden: boolean): InteractableNode[] {
+  const root = rootSelector ? document.querySelector(rootSelector) : document
+  if (!root) return []
+
+  const candidateSelector = [
+    'a[href]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    '[role]',
+    '[onclick]',
+    '[tabindex]',
+    '[data-testid]',
+    '[data-test]',
+  ].join(',')
+
+  const candidates = Array.from(root.querySelectorAll(candidateSelector)) as HTMLElement[]
+  const limited = candidates.slice(0, Math.max(1, maxNodes))
+
+  const isVisible = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect()
+    const style = window.getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+  }
+
+  const isEnabled = (element: HTMLElement) => {
+    const disabledByAttr = element.getAttribute('aria-disabled') === 'true'
+    const formControl = element as HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement
+    return !disabledByAttr && !Boolean(formControl.disabled)
+  }
+
+  const normalizeText = (element: HTMLElement) => {
+    const raw = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim()
+    if (!raw) return undefined
+    return raw.length > 120 ? `${raw.slice(0, 120)}...` : raw
+  }
+
+  const elementSelector = (element: HTMLElement) => {
+    if (element.id) return `#${CSS.escape(element.id)}`
+    const testId = element.getAttribute('data-testid') || element.getAttribute('data-test')
+    if (testId) return `${element.tagName.toLowerCase()}[data-testid="${CSS.escape(testId)}"]`
+
+    const parts: string[] = []
+    let current: HTMLElement | null = element
+    let depth = 0
+    while (current && current !== document.body && depth < 4) {
+      let part = current.tagName.toLowerCase()
+      const className = current.className && typeof current.className === 'string'
+        ? current.className.split(/\s+/).filter(Boolean).slice(0, 1).join('.')
+        : ''
+      if (className) {
+        part += `.${CSS.escape(className)}`
+      } else if (current.parentElement) {
+        const siblings = Array.from(current.parentElement.children)
+          .filter((child) => child.tagName === current!.tagName)
+        if (siblings.length > 1) {
+          part += `:nth-of-type(${siblings.indexOf(current) + 1})`
+        }
+      }
+      parts.unshift(part)
+      current = current.parentElement
+      depth += 1
+    }
+    return parts.join(' > ')
+  }
+
+  const riskHintsFor = (element: HTMLElement) => {
+    const hints: string[] = []
+    const text = `${element.innerText || ''} ${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`.toLowerCase()
+    const tag = element.tagName.toLowerCase()
+    const type = (element.getAttribute('type') || '').toLowerCase()
+    const href = (element.getAttribute('href') || '').toLowerCase()
+    const keywords = ['delete', 'remove', 'checkout', 'purchase', 'pay', 'billing', 'transfer', 'invite', 'create account', 'upload']
+    for (const keyword of keywords) {
+      if (text.includes(keyword) || href.includes(keyword)) {
+        hints.push(keyword)
+      }
+    }
+    if (type === 'password' || type === 'file') hints.push(type)
+    if (tag === 'form') hints.push('form')
+    return hints
+  }
+
+  const nodes: InteractableNode[] = []
+  for (const element of limited) {
+    const visible = isVisible(element)
+    if (!includeHidden && !visible) continue
+
+    const rect = element.getBoundingClientRect()
+    const form = element.closest('form') as HTMLFormElement | null
+    const href = element.getAttribute('href') || undefined
+    const role = element.getAttribute('role') || undefined
+    const type = element.getAttribute('type') || undefined
+
+    nodes.push({
+      selector: elementSelector(element),
+      role,
+      tag: element.tagName.toLowerCase(),
+      type,
+      text: normalizeText(element),
+      ariaLabel: element.getAttribute('aria-label') || undefined,
+      href,
+      visible,
+      enabled: isEnabled(element),
+      bounds: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      },
+      formContext: form ? {
+        action: form.action || undefined,
+        method: form.method || undefined,
+      } : undefined,
+      riskHints: riskHintsFor(element),
+    })
+  }
+
+  return nodes
 }
 
 function clickElementScript(selector: string, mode: 'human' | 'native' = 'human'): InteractionResult {
@@ -727,6 +880,35 @@ export async function handleGetElementInfo(message: GetElementInfoMessage): Prom
   } catch (err) {
     sendToWebSocket({
       type: 'browser-get-element-info-result',
+      requestId: message.requestId,
+      success: false,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+}
+
+export async function handleListInteractables(message: ListInteractablesMessage): Promise<void> {
+  try {
+    const tabId = await getTargetTabId(message.tabId)
+    const items = await executeInTabWithArgs(
+      tabId,
+      listInteractablesScript,
+      [
+        message.rootSelector,
+        Math.max(1, Math.min(message.maxNodes ?? 300, 2000)),
+        message.includeHidden === true
+      ]
+    )
+
+    sendToWebSocket({
+      type: 'browser-list-interactables-result',
+      requestId: message.requestId,
+      success: true,
+      items,
+    })
+  } catch (err) {
+    sendToWebSocket({
+      type: 'browser-list-interactables-result',
       requestId: message.requestId,
       success: false,
       error: err instanceof Error ? err.message : String(err)
