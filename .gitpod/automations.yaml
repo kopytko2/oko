@@ -1,26 +1,28 @@
 tasks:
   install-deps:
     name: Install Dependencies
+    description: Install and build all packages
     command: |
-      cd backend && npm ci
-      cd ../extension && npm ci
+      cd shared && npm ci && npm run build
+      cd ../backend && npm ci
+      cd ../extension && npm ci && npm run build
     triggeredBy:
       - postDevcontainerStart
 
   ci:
     name: CI Check
-    description: Run typecheck and tests
+    description: Run typecheck, lint, and tests
     command: |
-      cd extension && npm run ci
+      npm run check
+    triggeredBy:
+      - manual
 
 services:
   oko-backend:
     name: Oko Backend
-    description: Browser automation API server
+    description: Browser automation API server (port 8129)
     commands:
       start: |
         cd backend && npm start
       ready: |
-        curl -s http://localhost:8129/api/health > /dev/null 2>&1
-    triggeredBy:
-      - postDevcontainerStart
+        curl -sf http://localhost:8129/api/health
