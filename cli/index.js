@@ -8,8 +8,20 @@ import { toErrorEnvelope, writeData, writeError } from './format.js'
 import { runDoctor } from './commands/doctor.js'
 import { runTabsList } from './commands/tabs.js'
 import { runCaptureApi } from './commands/capture.js'
-import { runClick, runFill, runScreenshot } from './commands/browser.js'
+import {
+  runAssert,
+  runClick,
+  runFill,
+  runHover,
+  runKey,
+  runScreenshot,
+  runScroll,
+  runType,
+  runWait,
+} from './commands/browser.js'
 import { runApiCall } from './commands/api.js'
+import { runTestScenario } from './commands/test.js'
+import { runDiscoverApi } from './commands/discover.js'
 
 export async function runCli(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin }) {
   try {
@@ -38,6 +50,10 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
         data = await runCaptureApi({ client, options: parsed.options, output: config.output, io })
         break
       }
+      case 'discover.api': {
+        data = await runDiscoverApi({ client, options: parsed.options, config, io })
+        break
+      }
       case 'browser.screenshot': {
         data = await runScreenshot({ client, options: parsed.options })
         break
@@ -48,6 +64,34 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
       }
       case 'browser.fill': {
         data = await runFill({ client, options: parsed.options })
+        break
+      }
+      case 'browser.hover': {
+        data = await runHover({ client, options: parsed.options })
+        break
+      }
+      case 'browser.type': {
+        data = await runType({ client, options: parsed.options })
+        break
+      }
+      case 'browser.key': {
+        data = await runKey({ client, options: parsed.options })
+        break
+      }
+      case 'browser.scroll': {
+        data = await runScroll({ client, options: parsed.options })
+        break
+      }
+      case 'browser.wait': {
+        data = await runWait({ client, options: parsed.options })
+        break
+      }
+      case 'browser.assert': {
+        data = await runAssert({ client, options: parsed.options })
+        break
+      }
+      case 'test.run': {
+        data = await runTestScenario({ client, options: parsed.options })
         break
       }
       case 'api.get': {
@@ -71,6 +115,10 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
     }
 
     if (parsed.key === 'doctor') {
+      return data.success ? 0 : 1
+    }
+
+    if (data && typeof data.success === 'boolean') {
       return data.success ? 0 : 1
     }
 

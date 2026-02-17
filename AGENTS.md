@@ -30,6 +30,18 @@ npm run oko -- capture api --follow --until-enter --output ndjson
 
 # Capture until Enter and save as JSON
 npm run oko -- capture api --until-enter --out capture.json
+
+# Deterministic frontend actions
+npm run oko -- browser hover --tab-id 123 --selector "button.submit"
+npm run oko -- browser type --tab-id 123 --selector "input[name=email]" --text "test@example.com" --clear
+npm run oko -- browser wait --tab-id 123 --condition element --selector "#ready" --state visible
+npm run oko -- browser assert --tab-id 123 --selector "h1" --text-contains "Dashboard"
+
+# Declarative scenario run
+npm run oko -- test run docs/examples/login-scenario.yaml --strict
+
+# Autonomous API discovery from active logged-in tab
+npm run oko -- discover api --active
 ```
 
 Use REST/curl only when you need low-level control.
@@ -98,7 +110,11 @@ Extension:
 - Element picker: press `Alt+Shift+A`, click an element, then use the backend API to read `/api/browser/selected-element`.
 - Network capture (headers + bodies): `npm run oko -- capture api --mode full --url-pattern api`.
 - Element actions: `npm run oko -- browser click` and `npm run oko -- browser fill`.
+- Human-like interactions: `npm run oko -- browser hover|type|key|scroll|wait|assert`.
 - Screenshots: `npm run oko -- browser screenshot --tab-id <id> --full-page`.
+- Scenario runner: `npm run oko -- test run <scenario.yaml> [--strict]`.
+- API discovery runner: `npm run oko -- discover api [--active]`.
+- Scenario docs: `docs/testing-scenarios.md`.
 - Low-level API passthrough: `npm run oko -- api get|post|delete ...`.
 
 ### Debugger-based network capture (with response bodies)

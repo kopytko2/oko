@@ -13,8 +13,15 @@ import {
 import { getConnection, buildUrl } from '../lib/api'
 import {
   handleGetElementInfo,
+  handleListInteractables,
   handleClickElement,
-  handleFillInput
+  handleFillInput,
+  handleHoverElement,
+  handleTypeInput,
+  handlePressKey,
+  handleScroll,
+  handleWait,
+  handleAssert
 } from './browserMcp/elements'
 import {
   handleEnableNetworkCapture,
@@ -26,7 +33,8 @@ import {
   handleEnableDebuggerCapture,
   handleDisableDebuggerCapture,
   handleGetDebuggerRequests,
-  handleClearDebuggerRequests
+  handleClearDebuggerRequests,
+  handleDebuggerMark
 } from './browserMcp/debugger'
 import {
   safeParseBrowserRequest,
@@ -459,6 +467,11 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
         await handleGetElementInfo(message as unknown as Parameters<typeof handleGetElementInfo>[0])
         break
       }
+
+      case 'browser-list-interactables': {
+        await handleListInteractables(message as unknown as Parameters<typeof handleListInteractables>[0])
+        break
+      }
       
       case 'browser-click-element': {
         await handleClickElement(message as unknown as Parameters<typeof handleClickElement>[0])
@@ -467,6 +480,36 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
       
       case 'browser-fill-input': {
         await handleFillInput(message as unknown as Parameters<typeof handleFillInput>[0])
+        break
+      }
+
+      case 'browser-hover-element': {
+        await handleHoverElement(message as unknown as Parameters<typeof handleHoverElement>[0])
+        break
+      }
+
+      case 'browser-type-input': {
+        await handleTypeInput(message as unknown as Parameters<typeof handleTypeInput>[0])
+        break
+      }
+
+      case 'browser-press-key': {
+        await handlePressKey(message as unknown as Parameters<typeof handlePressKey>[0])
+        break
+      }
+
+      case 'browser-scroll': {
+        await handleScroll(message as unknown as Parameters<typeof handleScroll>[0])
+        break
+      }
+
+      case 'browser-wait': {
+        await handleWait(message as unknown as Parameters<typeof handleWait>[0])
+        break
+      }
+
+      case 'browser-assert': {
+        await handleAssert(message as unknown as Parameters<typeof handleAssert>[0])
         break
       }
       
@@ -509,6 +552,11 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
       
       case 'browser-clear-debugger-requests': {
         handleClearDebuggerRequests(message as unknown as Parameters<typeof handleClearDebuggerRequests>[0])
+        break
+      }
+
+      case 'browser-debugger-mark': {
+        handleDebuggerMark(message as unknown as Parameters<typeof handleDebuggerMark>[0])
         break
       }
       

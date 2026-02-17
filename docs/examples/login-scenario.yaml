@@ -1,0 +1,16 @@
+version: 1
+defaults:
+  tab: active
+  timeoutMs: 5000
+  pollMs: 100
+  typingDelayMs: 35
+  profile: deterministic
+steps:
+  - navigate: { url: "https://example.com/login" }
+  - wait: { condition: element, selector: "input[name=email]", state: visible }
+  - type: { selector: "input[name=email]", text: "test@example.com", clear: true }
+  - type: { selector: "input[name=password]", text: "secret", clear: true }
+  - click: { selector: "button[type=submit]", mode: human }
+  - wait: { condition: url, urlIncludes: "/dashboard" }
+  - assert: { selector: "h1", textContains: "Dashboard" }
+  - screenshot: { out: "artifacts/dashboard.png", fullPage: true }

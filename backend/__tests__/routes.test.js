@@ -80,10 +80,19 @@ describe('Oko Backend Routes', () => {
       { method: 'get', path: '/api/browser/network/requests' },
       { method: 'post', path: '/api/browser/debugger/enable' },
       { method: 'post', path: '/api/browser/debugger/disable' },
+      { method: 'post', path: '/api/browser/debugger/mark' },
       { method: 'get', path: '/api/browser/debugger/requests' },
       { method: 'delete', path: '/api/browser/debugger/requests' },
       { method: 'post', path: '/api/browser/element-info' },
+      { method: 'post', path: '/api/browser/interactables' },
       { method: 'post', path: '/api/browser/click' },
+      { method: 'post', path: '/api/browser/fill' },
+      { method: 'post', path: '/api/browser/hover' },
+      { method: 'post', path: '/api/browser/type' },
+      { method: 'post', path: '/api/browser/key' },
+      { method: 'post', path: '/api/browser/scroll' },
+      { method: 'post', path: '/api/browser/wait' },
+      { method: 'post', path: '/api/browser/assert' },
       { method: 'get', path: '/api/browser/screenshot' },
     ]
 
@@ -127,8 +136,17 @@ describe('Oko Backend Routes', () => {
       { method: 'post', path: '/api/browser/network/enable', body: {} },
       { method: 'post', path: '/api/browser/network/disable', body: {} },
       { method: 'get', path: '/api/browser/network/requests' },
+      { method: 'post', path: '/api/browser/debugger/mark', body: { tabId: 1, markerType: 'phase', label: 'phase-1' } },
       { method: 'post', path: '/api/browser/element-info', body: { selector: 'h1' } },
+      { method: 'post', path: '/api/browser/interactables', body: {} },
       { method: 'post', path: '/api/browser/click', body: { selector: 'button' } },
+      { method: 'post', path: '/api/browser/fill', body: { selector: 'input', value: 'test' } },
+      { method: 'post', path: '/api/browser/hover', body: { selector: 'button' } },
+      { method: 'post', path: '/api/browser/type', body: { selector: 'input', text: 'test' } },
+      { method: 'post', path: '/api/browser/key', body: { key: 'Enter' } },
+      { method: 'post', path: '/api/browser/scroll', body: { deltaY: 100 } },
+      { method: 'post', path: '/api/browser/wait', body: { condition: 'url', urlIncludes: 'example.com' } },
+      { method: 'post', path: '/api/browser/assert', body: { urlIncludes: 'example.com' } },
       { method: 'get', path: '/api/browser/screenshot' },
     ]
 
@@ -231,6 +249,28 @@ describe('Oko Backend Routes', () => {
       })
     })
 
+    describe('POST /api/browser/debugger/mark', () => {
+      it('requires tabId parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/debugger/mark')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ markerType: 'phase', label: 'phase-1' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('requires valid markerType', async () => {
+        const res = await request(app)
+          .post('/api/browser/debugger/mark')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ tabId: 1, markerType: 'invalid', label: 'phase-1' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/markerType/i)
+      })
+    })
+
     describe('GET /api/browser/debugger/requests', () => {
       it('requires tabId parameter', async () => {
         const res = await request(app)
@@ -248,6 +288,24 @@ describe('Oko Backend Routes', () => {
         
         expect(res.status).toBe(400)
         expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('rejects invalid includeMarkers value', async () => {
+        const res = await request(app)
+          .get('/api/browser/debugger/requests?tabId=1&includeMarkers=maybe')
+          .set('X-Auth-Token', AUTH_TOKEN)
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/includeMarkers/i)
+      })
+
+      it('rejects invalid timestamp range', async () => {
+        const res = await request(app)
+          .get('/api/browser/debugger/requests?tabId=1&sinceTs=100&untilTs=50')
+          .set('X-Auth-Token', AUTH_TOKEN)
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/sinceTs/i)
       })
     })
 
@@ -294,6 +352,28 @@ describe('Oko Backend Routes', () => {
       })
     })
 
+    describe('POST /api/browser/interactables', () => {
+      it('rejects invalid tabId', async () => {
+        const res = await request(app)
+          .post('/api/browser/interactables')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ tabId: 'invalid' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/tabId/i)
+      })
+
+      it('rejects invalid maxNodes', async () => {
+        const res = await request(app)
+          .post('/api/browser/interactables')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ maxNodes: -1 })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/maxNodes/i)
+      })
+    })
+
     describe('POST /api/browser/click', () => {
       it('requires selector parameter', async () => {
         const res = await request(app)
@@ -313,6 +393,16 @@ describe('Oko Backend Routes', () => {
         
         expect(res.status).toBe(400)
         expect(res.body.error).toMatch(/selector/i)
+      })
+
+      it('rejects invalid click mode', async () => {
+        const res = await request(app)
+          .post('/api/browser/click')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ selector: 'button', mode: 'invalid' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/mode/i)
       })
     })
 
@@ -355,6 +445,148 @@ describe('Oko Backend Routes', () => {
         
         // Should get 503 (no extension) not 400 (validation error)
         expect(res.status).toBe(503)
+      })
+    })
+
+    describe('POST /api/browser/hover', () => {
+      it('requires selector parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/hover')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({})
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/selector/i)
+      })
+    })
+
+    describe('POST /api/browser/type', () => {
+      it('requires selector parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/type')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ text: 'abc' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/selector/i)
+      })
+
+      it('requires text parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/type')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ selector: 'input' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/text/i)
+      })
+
+      it('rejects invalid delayMs', async () => {
+        const res = await request(app)
+          .post('/api/browser/type')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ selector: 'input', text: 'abc', delayMs: -1 })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/delayMs/i)
+      })
+    })
+
+    describe('POST /api/browser/key', () => {
+      it('requires key parameter', async () => {
+        const res = await request(app)
+          .post('/api/browser/key')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({})
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/key/i)
+      })
+
+      it('rejects invalid modifiers', async () => {
+        const res = await request(app)
+          .post('/api/browser/key')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ key: 'Enter', modifiers: 'Shift' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/modifiers/i)
+      })
+    })
+
+    describe('POST /api/browser/scroll', () => {
+      it('requires movement options', async () => {
+        const res = await request(app)
+          .post('/api/browser/scroll')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({})
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/at least one/i)
+      })
+
+      it('rejects invalid to value', async () => {
+        const res = await request(app)
+          .post('/api/browser/scroll')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ to: 'middle' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/to/i)
+      })
+    })
+
+    describe('POST /api/browser/wait', () => {
+      it('requires valid condition', async () => {
+        const res = await request(app)
+          .post('/api/browser/wait')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({})
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/condition/i)
+      })
+
+      it('requires selector for element wait', async () => {
+        const res = await request(app)
+          .post('/api/browser/wait')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ condition: 'element' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/selector/i)
+      })
+
+      it('requires urlIncludes for url wait', async () => {
+        const res = await request(app)
+          .post('/api/browser/wait')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ condition: 'url' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/urlIncludes/i)
+      })
+    })
+
+    describe('POST /api/browser/assert', () => {
+      it('requires at least one assertion field', async () => {
+        const res = await request(app)
+          .post('/api/browser/assert')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({})
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/assertion/i)
+      })
+
+      it('rejects invalid visible type', async () => {
+        const res = await request(app)
+          .post('/api/browser/assert')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ visible: 'yes' })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/visible/i)
       })
     })
 
@@ -510,10 +742,19 @@ describe('Oko Backend Routes', () => {
       { method: 'get', path: '/api/browser/network/requests' },
       { method: 'post', path: '/api/browser/debugger/enable' },
       { method: 'post', path: '/api/browser/debugger/disable' },
+      { method: 'post', path: '/api/browser/debugger/mark' },
       { method: 'get', path: '/api/browser/debugger/requests' },
       { method: 'delete', path: '/api/browser/debugger/requests' },
       { method: 'post', path: '/api/browser/element-info' },
+      { method: 'post', path: '/api/browser/interactables' },
       { method: 'post', path: '/api/browser/click' },
+      { method: 'post', path: '/api/browser/fill' },
+      { method: 'post', path: '/api/browser/hover' },
+      { method: 'post', path: '/api/browser/type' },
+      { method: 'post', path: '/api/browser/key' },
+      { method: 'post', path: '/api/browser/scroll' },
+      { method: 'post', path: '/api/browser/wait' },
+      { method: 'post', path: '/api/browser/assert' },
       { method: 'get', path: '/api/browser/screenshot' },
     ]
 

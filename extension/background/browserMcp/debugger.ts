@@ -30,10 +30,24 @@ interface DebuggerRequest {
   requestBody?: string
   responseHeaders?: Record<string, string>
   responseBody?: string
+  status?: number
   statusCode?: number
   mimeType?: string
   encodedDataLength?: number
+  initiator?: Record<string, unknown>
+  documentURL?: string
+  frameId?: string
+  markerRefs?: string[]
+  requestFingerprint?: string
   error?: string
+}
+
+interface DebuggerMarker {
+  id: string
+  ts: number
+  markerType: 'phase' | 'action-start' | 'action-end'
+  label: string
+  meta?: Record<string, unknown>
 }
 
 interface DebuggerSession {
@@ -44,6 +58,9 @@ interface DebuggerSession {
   urlFilter?: string[]
   captureBody: boolean
   exposeSensitiveHeaders: boolean
+  markers: DebuggerMarker[]
+  activeActionMarkerIds: Set<string>
+  latestPhaseMarkerId?: string
 }
 
 // =============================================================================
@@ -87,6 +104,30 @@ function toHeaderMap(
   return mapped
 }
 
+function normalizePathname(pathname: string): string {
+  return pathname
+    .split('/')
+    .map((segment) => {
+      if (!segment) return segment
+      if (/^\d+$/.test(segment)) return '{id}'
+      if (/^[0-9a-f]{24,}$/i.test(segment)) return '{hex}'
+      if (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(segment)) return '{uuid}'
+      if (/^[A-Za-z0-9_-]{20,}$/.test(segment)) return '{token}'
+      return segment
+    })
+    .join('/')
+}
+
+function buildRequestFingerprint(method: string, rawUrl: string, resourceType: string): string {
+  try {
+    const parsed = new URL(rawUrl)
+    const normalizedPath = normalizePathname(parsed.pathname)
+    return `${method.toUpperCase()} ${parsed.origin}${normalizedPath} [${resourceType || 'unknown'}]`
+  } catch {
+    return `${method.toUpperCase()} ${rawUrl} [${resourceType || 'unknown'}]`
+  }
+}
+
 // =============================================================================
 // DEBUGGER EVENT HANDLERS
 // =============================================================================
@@ -107,6 +148,13 @@ function onDebuggerEvent(
     case 'Network.requestWillBeSent': {
       const requestId = p?.requestId as string
       const request = p?.request as Record<string, unknown>
+      const requestUrl = request?.url as string
+      const requestMethod = request?.method as string
+      const resourceType = p?.type as string
+      const markerRefs = [
+        ...(session.latestPhaseMarkerId ? [session.latestPhaseMarkerId] : []),
+        ...Array.from(session.activeActionMarkerIds),
+      ]
       
       if (session.requests.size >= session.maxRequests) {
         // Remove oldest request
@@ -116,12 +164,17 @@ function onDebuggerEvent(
       
       session.requests.set(requestId, {
         requestId,
-        url: request?.url as string,
-        method: request?.method as string,
-        resourceType: p?.type as string,
+        url: requestUrl,
+        method: requestMethod,
+        resourceType,
         tabId,
         timestamp: Date.now(),
-        requestHeaders: toHeaderMap(request?.headers, session.exposeSensitiveHeaders)
+        requestHeaders: toHeaderMap(request?.headers, session.exposeSensitiveHeaders),
+        initiator: (p?.initiator as Record<string, unknown>) || undefined,
+        documentURL: typeof p?.documentURL === 'string' ? p.documentURL as string : undefined,
+        frameId: typeof p?.frameId === 'string' ? p.frameId as string : undefined,
+        markerRefs: markerRefs.length > 0 ? markerRefs : undefined,
+        requestFingerprint: buildRequestFingerprint(requestMethod || 'GET', requestUrl || '', resourceType || ''),
       })
 
       if (!requestId || !request?.url || !matchesUrlFilter(String(request.url), session.urlFilter)) {
@@ -145,6 +198,7 @@ function onDebuggerEvent(
       
       if (req) {
         req.statusCode = response?.status as number
+        req.status = response?.status as number
         req.mimeType = response?.mimeType as string
         req.responseHeaders = toHeaderMap(response?.headers, session.exposeSensitiveHeaders)
         req.encodedDataLength = response?.encodedDataLength as number
@@ -290,7 +344,9 @@ export async function handleEnableDebuggerCapture(message: EnableDebuggerMessage
       maxRequests,
       urlFilter: message.urlFilter,
       captureBody,
-      exposeSensitiveHeaders
+      exposeSensitiveHeaders,
+      markers: [],
+      activeActionMarkerIds: new Set()
     })
     
     sendToWebSocket({
@@ -348,10 +404,29 @@ export interface GetDebuggerRequestsMessage {
   resourceType?: string
   limit?: number
   offset?: number
+  sinceTs?: number
+  untilTs?: number
+  markerId?: string
+  includeMarkers?: boolean
+  includeInitiator?: boolean
+  includeFrame?: boolean
 }
 
 export function handleGetDebuggerRequests(message: GetDebuggerRequestsMessage): void {
-  const { requestId, tabId, urlPattern, resourceType, limit = 50, offset = 0 } = message
+  const {
+    requestId,
+    tabId,
+    urlPattern,
+    resourceType,
+    limit = 50,
+    offset = 0,
+    sinceTs,
+    untilTs,
+    markerId,
+    includeMarkers = false,
+    includeInitiator = false,
+    includeFrame = false,
+  } = message
   
   const session = sessions.get(tabId)
   
@@ -381,6 +456,16 @@ export function handleGetDebuggerRequests(message: GetDebuggerRequestsMessage): 
   if (resourceType) {
     requests = requests.filter(r => r.resourceType === resourceType)
   }
+
+  if (typeof sinceTs === 'number') {
+    requests = requests.filter((r) => (r.timestamp || 0) >= sinceTs)
+  }
+  if (typeof untilTs === 'number') {
+    requests = requests.filter((r) => (r.timestamp || 0) <= untilTs)
+  }
+  if (markerId) {
+    requests = requests.filter((r) => Array.isArray(r.markerRefs) && r.markerRefs.includes(markerId))
+  }
   
   // Sort by timestamp descending (newest first)
   requests.sort((a, b) => b.timestamp - a.timestamp)
@@ -388,15 +473,81 @@ export function handleGetDebuggerRequests(message: GetDebuggerRequestsMessage): 
   // Paginate
   const total = requests.length
   const paginated = requests.slice(offset, offset + limit)
+  const shaped = paginated.map((request) => {
+    const row = { ...request }
+    if (!includeInitiator) {
+      delete row.initiator
+    }
+    if (!includeFrame) {
+      delete row.frameId
+      delete row.documentURL
+    }
+    if (!includeMarkers) {
+      delete row.markerRefs
+    }
+    return row
+  })
   
   sendToWebSocket({
     type: 'browser-get-debugger-requests-result',
     requestId,
     success: true,
-    requests: paginated,
+    requests: shaped,
+    markers: includeMarkers ? session.markers : undefined,
     total,
     limit,
     offset
+  })
+}
+
+export interface DebuggerMarkMessage {
+  requestId: string
+  tabId: number
+  markerType: 'phase' | 'action-start' | 'action-end'
+  label: string
+  meta?: Record<string, unknown>
+}
+
+export function handleDebuggerMark(message: DebuggerMarkMessage): void {
+  const { requestId, tabId, markerType, label, meta } = message
+  const session = sessions.get(tabId)
+
+  if (!session) {
+    sendToWebSocket({
+      type: 'browser-debugger-mark-result',
+      requestId,
+      success: false,
+      error: 'No debugger session for this tab'
+    })
+    return
+  }
+
+  const marker: DebuggerMarker = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ts: Date.now(),
+    markerType,
+    label,
+    meta,
+  }
+
+  session.markers.push(marker)
+  if (session.markers.length > 500) {
+    session.markers.shift()
+  }
+
+  if (markerType === 'phase') {
+    session.latestPhaseMarkerId = marker.id
+  } else if (markerType === 'action-start') {
+    session.activeActionMarkerIds.add(marker.id)
+  } else if (markerType === 'action-end') {
+    session.activeActionMarkerIds.clear()
+  }
+
+  sendToWebSocket({
+    type: 'browser-debugger-mark-result',
+    requestId,
+    success: true,
+    marker,
   })
 }
 
@@ -412,6 +563,9 @@ export function handleClearDebuggerRequests(message: ClearDebuggerRequestsMessag
   
   if (session) {
     session.requests.clear()
+    session.markers = []
+    session.activeActionMarkerIds.clear()
+    session.latestPhaseMarkerId = undefined
   }
   
   sendToWebSocket({

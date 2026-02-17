@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Oko WebSocket message types - shared between backend and extension",
-  "version": "1.0.0",
+  "version": "1.2.0",
   
   "browserRequests": {
     "browser-list-tabs": {
@@ -26,13 +26,48 @@
     },
     "browser-click-element": {
       "description": "Click a DOM element",
-      "request": { "tabId?": "number", "selector": "string" },
+      "request": { "tabId?": "number", "selector": "string", "mode?": "\"human\"|\"native\"" },
       "response": {}
     },
     "browser-fill-input": {
       "description": "Fill an input element with a value",
       "request": { "tabId?": "number", "selector": "string", "value": "string" },
       "response": {}
+    },
+    "browser-hover-element": {
+      "description": "Hover a DOM element with deterministic mouse events",
+      "request": { "tabId?": "number", "selector": "string" },
+      "response": {}
+    },
+    "browser-type-input": {
+      "description": "Type text into an element with deterministic key/input events",
+      "request": { "tabId?": "number", "selector": "string", "text": "string", "clear?": "boolean", "delayMs?": "number" },
+      "response": {}
+    },
+    "browser-press-key": {
+      "description": "Press a keyboard key with optional modifiers",
+      "request": { "tabId?": "number", "key": "string", "modifiers?": "string[]" },
+      "response": {}
+    },
+    "browser-scroll": {
+      "description": "Scroll window or element deterministically",
+      "request": { "tabId?": "number", "selector?": "string", "deltaX?": "number", "deltaY?": "number", "to?": "\"top\"|\"bottom\"", "behavior?": "\"auto\"|\"smooth\"" },
+      "response": {}
+    },
+    "browser-wait": {
+      "description": "Poll for DOM or URL condition with timeout",
+      "request": { "tabId?": "number", "condition": "\"element\"|\"url\"", "selector?": "string", "state?": "\"present\"|\"visible\"|\"hidden\"", "urlIncludes?": "string", "timeoutMs?": "number", "pollMs?": "number" },
+      "response": { "matched": "boolean", "elapsedMs": "number" }
+    },
+    "browser-assert": {
+      "description": "Assert DOM and URL conditions",
+      "request": { "tabId?": "number", "selector?": "string", "visible?": "boolean", "enabled?": "boolean", "textContains?": "string", "valueEquals?": "string", "urlIncludes?": "string" },
+      "response": { "passed": "boolean", "details": "object" }
+    },
+    "browser-list-interactables": {
+      "description": "List actionable interactable elements from a tab DOM",
+      "request": { "tabId?": "number", "rootSelector?": "string", "maxNodes?": "number", "includeHidden?": "boolean" },
+      "response": { "items": "InteractableNode[]" }
     },
     "browser-enable-network-capture": {
       "description": "Enable network request capture",
@@ -61,13 +96,18 @@
     },
     "browser-get-debugger-requests": {
       "description": "Get debugger-captured requests with response bodies",
-      "request": { "tabId": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number" },
-      "response": { "requests": "DebuggerRequest[]" }
+      "request": { "tabId": "number", "urlPattern?": "string", "resourceType?": "string", "limit?": "number", "offset?": "number", "sinceTs?": "number", "untilTs?": "number", "markerId?": "string", "includeMarkers?": "boolean", "includeInitiator?": "boolean", "includeFrame?": "boolean" },
+      "response": { "requests": "DebuggerRequest[]", "markers?": "DebuggerMarker[]" }
     },
     "browser-clear-debugger-requests": {
       "description": "Clear debugger-captured requests",
       "request": { "tabId": "number" },
       "response": {}
+    },
+    "browser-debugger-mark": {
+      "description": "Create a marker in debugger session for action/phase correlation",
+      "request": { "tabId": "number", "markerType": "\"phase\"|\"action-start\"|\"action-end\"", "label": "string", "meta?": "object" },
+      "response": { "marker": "DebuggerMarker" }
     }
   },
   
