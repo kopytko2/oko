@@ -25,6 +25,9 @@ npm run oko -- tabs list
 # Capture API traffic from active tab (10s default window)
 npm run oko -- capture api --mode full --url-pattern api
 
+# Stream requests as NDJSON in real time (stop with Enter)
+npm run oko -- capture api --follow --until-enter --output ndjson
+
 # Capture until Enter and save as JSON
 npm run oko -- capture api --until-enter --out capture.json
 ```

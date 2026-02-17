@@ -116,6 +116,7 @@ export function parseCaptureApiOptions(args) {
     tabId: undefined,
     tabUrl: undefined,
     active: false,
+    follow: false,
     mode: 'full',
     urlPattern: undefined,
     duration: undefined,
@@ -129,6 +130,11 @@ export function parseCaptureApiOptions(args) {
     const token = args[i]
     if (token === '--active') {
       options.active = true
+      i += 1
+      continue
+    }
+    if (token === '--follow') {
+      options.follow = true
       i += 1
       continue
     }
@@ -178,6 +184,10 @@ export function parseCaptureApiOptions(args) {
 
   if (options.duration !== undefined && options.untilEnter) {
     throw new UsageError('Use either --duration or --until-enter, not both')
+  }
+
+  if (options.follow && options.out) {
+    throw new UsageError('--follow cannot be combined with --out (stream is written to stdout)')
   }
 
   if (selectors === 0) {
@@ -340,5 +350,5 @@ export function parseLowLevelApiOptions(method, args) {
 }
 
 export function getHelpText() {
-  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS\n  browser fill --tab-id N --selector CSS --value TEXT\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n`
+  return `Oko CLI (agent-first)\n\nGlobal options:\n  --url <url>                Backend URL (default: http://localhost:8129)\n  --token <token>            Auth token\n  --connection-code <oko:..> Parse URL/token from connection code\n  --timeout-ms <n>           Request timeout in ms (default: 10000)\n  --output json|ndjson|text  Output format (default: json)\n  --help                     Show help\n\nCommands:\n  doctor\n  tabs list\n  capture api [--tab-id N | --tab-url REGEX | --active]\n              [--follow]\n              [--mode safe|full] [--url-pattern REGEX]\n              [--duration SEC | --until-enter]\n              [--max-requests N] [--limit N] [--out PATH]\n  browser screenshot --tab-id N [--full-page]\n  browser click --tab-id N --selector CSS\n  browser fill --tab-id N --selector CSS --value TEXT\n  api get <path> [--query k=v]\n  api post <path> [--json '{...}']\n  api delete <path> [--query k=v]\n\nNotes:\n  - capture api defaults to --mode full (captures sensitive headers/bodies)\n  - use --mode safe on sensitive targets\n  - --follow streams requests as NDJSON lines in real time\n`
 }
