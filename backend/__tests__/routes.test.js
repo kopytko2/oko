@@ -207,6 +207,16 @@ describe('Oko Backend Routes', () => {
         expect(res.status).toBe(400)
         expect(res.body.error).toMatch(/tabId/i)
       })
+
+      it('rejects invalid mode', async () => {
+        const res = await request(app)
+          .post('/api/browser/debugger/enable')
+          .set('X-Auth-Token', AUTH_TOKEN)
+          .send({ tabId: 1, mode: 'unsafe' })
+        
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/mode/i)
+      })
     })
 
     describe('POST /api/browser/debugger/disable', () => {

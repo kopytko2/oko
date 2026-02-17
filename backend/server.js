@@ -355,14 +355,19 @@ app.post('/api/browser/debugger/enable', async (req, res) => {
     : Array.isArray(body.domainFilter) ? body.domainFilter 
     : undefined
   const maxRequests = parseInteger(body.maxRequests) || 500
+  const mode = typeof body.mode === 'string' ? body.mode.toLowerCase() : 'full'
+  if (mode !== 'safe' && mode !== 'full') {
+    return res.status(400).json({ success: false, error: "mode must be 'safe' or 'full'" })
+  }
   // captureBody: set to false to capture headers only (safer for sensitive sites)
-  const captureBody = body.captureBody !== false
+  const captureBody = body.captureBody !== false && mode === 'full'
 
   sendToExtension(req, res, 'browser-enable-debugger-capture', {
     tabId,
     urlFilter,
     maxRequests,
-    captureBody
+    captureBody,
+    mode
   })
 })
 

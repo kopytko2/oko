@@ -113,9 +113,9 @@ Uses Chrome DevTools Protocol. Shows a yellow "debugging" banner on the tab.
 ```bash
 # Enable debugger on a tab
 POST /api/browser/debugger/enable
-{"tabId": 12345}
+{"tabId": 12345, "mode": "full"}
 
-# Get requests with full response bodies
+# Get requests with request/response bodies and headers
 GET /api/browser/debugger/requests?tabId=12345&urlPattern=api&limit=20
 
 # Disable debugger
