@@ -41,6 +41,9 @@ interface DebuggerSession {
   attached: boolean
   requests: Map<string, DebuggerRequest>
   maxRequests: number
+  urlFilter?: string[]
+  captureBody: boolean
+  exposeSensitiveHeaders: boolean
 }
 
 // =============================================================================
@@ -48,7 +51,41 @@ interface DebuggerSession {
 // =============================================================================
 
 const sessions: Map<number, DebuggerSession> = new Map()
-const MAX_BODY_SIZE = 1024 * 1024 // 1MB max body capture
+const SAFE_MAX_BODY_SIZE = 1024 * 1024 // 1MB in safe mode
+const REDACTED_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-auth-token',
+  'x-api-key'
+])
+
+function matchesUrlFilter(url: string, filter?: string[]): boolean {
+  if (!filter || filter.length === 0) return true
+  return filter.some((pattern) => {
+    try {
+      return new RegExp(pattern, 'i').test(url)
+    } catch {
+      return url.includes(pattern)
+    }
+  })
+}
+
+function toHeaderMap(
+  headers: unknown,
+  exposeSensitiveHeaders: boolean
+): Record<string, string> | undefined {
+  if (!headers || typeof headers !== 'object') return undefined
+
+  const mapped: Record<string, string> = {}
+  for (const [rawKey, rawValue] of Object.entries(headers as Record<string, unknown>)) {
+    const key = String(rawKey)
+    if (!exposeSensitiveHeaders && REDACTED_HEADERS.has(key.toLowerCase())) continue
+    mapped[key] = String(rawValue)
+  }
+  return mapped
+}
 
 // =============================================================================
 // DEBUGGER EVENT HANDLERS
@@ -84,8 +121,20 @@ function onDebuggerEvent(
         resourceType: p?.type as string,
         tabId,
         timestamp: Date.now(),
-        requestHeaders: request?.headers as Record<string, string>
+        requestHeaders: toHeaderMap(request?.headers, session.exposeSensitiveHeaders)
       })
+
+      if (!requestId || !request?.url || !matchesUrlFilter(String(request.url), session.urlFilter)) {
+        session.requests.delete(requestId)
+        break
+      }
+
+      if (session.captureBody && request?.hasPostData) {
+        const req = session.requests.get(requestId)
+        if (req) {
+          void fetchRequestPostData(tabId, requestId, req)
+        }
+      }
       break
     }
     
@@ -97,7 +146,7 @@ function onDebuggerEvent(
       if (req) {
         req.statusCode = response?.status as number
         req.mimeType = response?.mimeType as string
-        req.responseHeaders = response?.headers as Record<string, string>
+        req.responseHeaders = toHeaderMap(response?.headers, session.exposeSensitiveHeaders)
         req.encodedDataLength = response?.encodedDataLength as number
       }
       break
@@ -107,9 +156,9 @@ function onDebuggerEvent(
       const requestId = p?.requestId as string
       const req = session.requests.get(requestId)
       
-      if (req && tabId) {
+      if (req && tabId && session.captureBody) {
         // Fetch response body
-        void fetchResponseBody(tabId, requestId, req)
+        void fetchResponseBody(tabId, requestId, req, session.exposeSensitiveHeaders)
       }
       break
     }
@@ -126,10 +175,30 @@ function onDebuggerEvent(
   }
 }
 
-async function fetchResponseBody(
+async function fetchRequestPostData(
   tabId: number,
   requestId: string,
   req: DebuggerRequest
+): Promise<void> {
+  try {
+    const result = await chrome.debugger.sendCommand(
+      { tabId },
+      'Network.getRequestPostData',
+      { requestId }
+    ) as { postData: string }
+    if (typeof result?.postData === 'string') {
+      req.requestBody = result.postData
+    }
+  } catch {
+    // Post data is not available for all requests.
+  }
+}
+
+async function fetchResponseBody(
+  tabId: number,
+  requestId: string,
+  req: DebuggerRequest,
+  exposeSensitiveHeaders: boolean
 ): Promise<void> {
   try {
     const result = await chrome.debugger.sendCommand(
@@ -139,9 +208,10 @@ async function fetchResponseBody(
     ) as { body: string; base64Encoded: boolean }
     
     if (result?.body) {
-      // Limit body size
-      if (result.body.length <= MAX_BODY_SIZE) {
-        req.responseBody = result.base64Encoded 
+      if (exposeSensitiveHeaders) {
+        req.responseBody = result.body
+      } else if (result.body.length <= SAFE_MAX_BODY_SIZE) {
+        req.responseBody = result.base64Encoded
           ? `[base64] ${result.body.slice(0, 1000)}...`
           : result.body
       } else {
@@ -180,10 +250,16 @@ export interface EnableDebuggerMessage {
   requestId: string
   tabId: number
   maxRequests?: number
+  urlFilter?: string[]
+  captureBody?: boolean
+  mode?: 'safe' | 'full'
 }
 
 export async function handleEnableDebuggerCapture(message: EnableDebuggerMessage): Promise<void> {
   const { requestId, tabId, maxRequests = 100 } = message
+  const mode = message.mode === 'safe' ? 'safe' : 'full'
+  const captureBody = message.captureBody !== false && mode === 'full'
+  const exposeSensitiveHeaders = mode === 'full'
   
   try {
     ensureListeners()
@@ -211,7 +287,10 @@ export async function handleEnableDebuggerCapture(message: EnableDebuggerMessage
       tabId,
       attached: true,
       requests: new Map(),
-      maxRequests
+      maxRequests,
+      urlFilter: message.urlFilter,
+      captureBody,
+      exposeSensitiveHeaders
     })
     
     sendToWebSocket({

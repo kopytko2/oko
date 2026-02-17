@@ -82,7 +82,7 @@ Extension:
 The standard network capture only captures headers. To capture full response bodies, use the debugger API:
 
 1. Get the tab ID: `GET /api/browser/tabs` - find the tab you want to monitor
-2. Enable debugger capture: `POST /api/browser/debugger/enable` with `{"tabId": <id>}`
+2. Enable debugger capture: `POST /api/browser/debugger/enable` with `{"tabId": <id>, "mode": "full"}`
    - This shows a yellow "Oko is debugging this tab" banner
 3. Browse/interact with the page to trigger requests
 4. Get captured requests: `GET /api/browser/debugger/requests?tabId=<id>&urlPattern=<regex>&limit=50`
@@ -95,7 +95,7 @@ curl -H "X-Auth-Token: $TOKEN" "$URL/api/browser/tabs"
 
 # Enable debugger on tab 12345
 curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
-  "$URL/api/browser/debugger/enable" -d '{"tabId": 12345}'
+  "$URL/api/browser/debugger/enable" -d '{"tabId": 12345, "mode": "full"}'
 
 # Get captured requests with response bodies
 curl -H "X-Auth-Token: $TOKEN" "$URL/api/browser/debugger/requests?tabId=12345&urlPattern=api&limit=10"
