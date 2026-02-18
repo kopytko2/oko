@@ -22,6 +22,7 @@ import {
 import { runApiCall } from './commands/api.js'
 import { runTestScenario } from './commands/test.js'
 import { runDiscoverApi } from './commands/discover.js'
+import { runConnectCode } from './commands/connect.js'
 
 export async function runCli(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin }) {
   try {
@@ -52,6 +53,10 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
       }
       case 'discover.api': {
         data = await runDiscoverApi({ client, options: parsed.options, config, io })
+        break
+      }
+      case 'connect.code': {
+        data = await runConnectCode({ client, config, options: parsed.options })
         break
       }
       case 'browser.screenshot': {

@@ -304,6 +304,10 @@
       line-height: 1.5;
     }
 
+    .quick-config-actions {
+      margin-top: 8px;
+    }
+
     .divider {
       height: 1px;
       background: var(--border-base);
@@ -490,6 +494,9 @@
             Connection Code <span class="form-hint">(paste oko:... code)</span>
           </label>
           <textarea class="form-input" id="quickConfig" placeholder="Paste connection code from backend..."></textarea>
+          <div class="quick-config-actions">
+            <button class="btn btn-secondary" id="clipboardBtn" type="button">Connect from Clipboard</button>
+          </div>
         </div>
 
         <div class="divider"></div>

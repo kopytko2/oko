@@ -40,9 +40,10 @@ Token: <generated-token>
 ### 3. Connect
 
 **Quick connect (recommended):**
-1. Copy the connection code from the backend output (starts with `oko:`)
+1. Run `npm run oko -- connect code --copy` (or copy the `oko:...` code from backend logs)
 2. Open the Oko extension popup
-3. Paste the code into the "Connection Code" field - it auto-saves and connects
+3. Click **Connect from Clipboard** (or paste into "Connection Code")
+4. It auto-saves and connects
 
 **Manual setup:**
 Open the Oko extension popup, paste the URL and token separately, click **Test** then **Save**.
@@ -54,6 +55,9 @@ The CLI wraps auth headers, retries, and debugger lifecycle cleanup.
 ```bash
 # Health + extension connectivity
 npm run oko -- doctor
+
+# Generate extension connection code (optionally copy to clipboard)
+npm run oko -- connect code --copy
 
 # List tabs
 npm run oko -- tabs list
@@ -381,7 +385,7 @@ Yes - Oko is designed to work with AI agents. The API lets agents:
 
 **Badge shows red "!" icon**
 - WebSocket disconnected - click popup and hit "Reconnect"
-- Backend may have restarted - paste connection code again
+- Backend may have restarted - run `npm run oko -- connect code --copy` and reconnect from clipboard
 
 ### Network Capture Issues
 
