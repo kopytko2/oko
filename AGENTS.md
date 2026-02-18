@@ -114,6 +114,7 @@ Extension:
 - API discovery runner: `npm run oko -- discover api [--active]`.
 - Scenario docs: `docs/testing-scenarios.md`.
 - Low-level API passthrough: `npm run oko -- api get|post|delete ...`.
+- Navigation is background-first by default (`active=false`); set `active=true` only when focus switch is desired.
 
 ### Debugger-based network capture (with response bodies)
 

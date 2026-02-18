@@ -53,7 +53,7 @@ steps:
     url: "https://example.com"
     tabId: 123        # optional
     newTab: false     # optional
-    active: true      # optional
+    active: false     # optional (default: false, background-first)
 ```
 
 ### wait
@@ -149,4 +149,3 @@ The MVP is deterministic by design:
 - no random timing jitter
 - fixed typing delay (`defaults.typingDelayMs`, default `35`)
 - fixed wait polling (`defaults.pollMs`, default `100`)
-

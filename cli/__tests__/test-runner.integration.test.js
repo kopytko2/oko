@@ -144,4 +144,45 @@ steps:
       expect(result.steps[0].success).toBe(false)
     })
   })
+
+  it('uses background-first navigate default and reuses created tab for later steps', async () => {
+    const calls = []
+    const client = {
+      async post(pathname, body) {
+        calls.push(['post', pathname, body])
+        if (pathname === '/api/browser/navigate') {
+          return { success: true, tab: { id: 77, url: body.url } }
+        }
+        if (pathname === '/api/browser/wait') {
+          return { success: true, matched: true, elapsedMs: 20 }
+        }
+        return { success: true }
+      },
+      async get() {
+        return { success: true }
+      },
+    }
+
+    const yaml = `version: 1
+steps:
+  - navigate: { url: "https://example.com/work" }
+  - wait: { condition: url, urlIncludes: "example.com/work" }
+`
+
+    await withTempScenario(yaml, async (file) => {
+      const result = await runTestScenario({
+        client,
+        options: {
+          scenarioPath: file,
+          strict: true,
+        },
+      })
+
+      expect(result.success).toBe(true)
+      expect(calls[0][1]).toBe('/api/browser/navigate')
+      expect(calls[0][2].active).toBe(false)
+      expect(calls[1][1]).toBe('/api/browser/wait')
+      expect(calls[1][2].tabId).toBe(77)
+    })
+  })
 })

@@ -410,7 +410,7 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
         const url = message.url as string
         const tabId = message.tabId as number | undefined
         const newTab = message.newTab as boolean | undefined
-        const active = message.active as boolean ?? true
+        const active = message.active as boolean ?? false
         
         let tab: chrome.tabs.Tab
         if (newTab) {
@@ -418,12 +418,8 @@ async function handleBrowserRequest(type: string, message: ValidMessage): Promis
         } else if (tabId) {
           tab = await chrome.tabs.update(tabId, { url, active })
         } else {
-          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-          if (activeTab?.id) {
-            tab = await chrome.tabs.update(activeTab.id, { url })
-          } else {
-            tab = await chrome.tabs.create({ url, active })
-          }
+          // Background-first default: when no tab is specified, open a new worker tab.
+          tab = await chrome.tabs.create({ url, active })
         }
         
         sendToWebSocket({
