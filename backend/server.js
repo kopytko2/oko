@@ -223,7 +223,8 @@ app.post('/api/browser/navigate', async (req, res) => {
   }
 
   const newTab = body.newTab === true
-  const active = body.active !== false
+  // Background-first default: do not steal visible focus unless explicitly requested.
+  const active = body.active === true
 
   sendToExtension(req, res, 'browser-navigate', {
     url,

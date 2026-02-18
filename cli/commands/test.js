@@ -268,9 +268,10 @@ export async function loadScenario(scenarioPath, strict = false) {
   }
 }
 
-function resolveTabId(cliTabId, defaults, stepPayload) {
+function resolveTabId(cliTabId, defaults, stepPayload, sessionTabId) {
   if (cliTabId !== undefined) return cliTabId
   if (stepPayload && typeof stepPayload.tabId === 'number') return stepPayload.tabId
+  if (typeof sessionTabId === 'number') return sessionTabId
   if (typeof defaults.tab === 'number') return defaults.tab
   return undefined
 }
@@ -292,8 +293,8 @@ async function maybeWriteScreenshot(outPath, dataUrl) {
   return outPath
 }
 
-async function executeStep({ client, step, defaults, cliTabId }) {
-  const tabId = resolveTabId(cliTabId, defaults, step.payload)
+async function executeStep({ client, step, defaults, cliTabId, sessionTabId }) {
+  const tabId = resolveTabId(cliTabId, defaults, step.payload, sessionTabId)
 
   switch (step.type) {
     case 'navigate': {
@@ -301,7 +302,7 @@ async function executeStep({ client, step, defaults, cliTabId }) {
         url: step.payload.url,
         tabId,
         newTab: step.payload.newTab,
-        active: step.payload.active,
+        active: step.payload.active ?? false,
       })
     }
     case 'wait': {
@@ -413,6 +414,9 @@ export async function runTestScenario({ client, options }) {
   const scenario = await loadScenario(options.scenarioPath, options.strict === true)
   const startedAt = Date.now()
   const stepResults = []
+  let sessionTabId = typeof options.tabId === 'number'
+    ? options.tabId
+    : (typeof scenario.defaults.tab === 'number' ? scenario.defaults.tab : undefined)
 
   for (let i = 0; i < scenario.steps.length; i += 1) {
     const step = scenario.steps[i]
@@ -424,7 +428,17 @@ export async function runTestScenario({ client, options }) {
         step,
         defaults: scenario.defaults,
         cliTabId: options.tabId,
+        sessionTabId,
       })
+
+      if (
+        step.type === 'navigate' &&
+        options.tabId === undefined &&
+        step.payload.tabId === undefined &&
+        typeof result?.tab?.id === 'number'
+      ) {
+        sessionTabId = result.tab.id
+      }
 
       const success = isStepPassing(step.type, result)
       stepResults.push({

@@ -114,6 +114,8 @@ POST /api/browser/navigate
 {"url": "https://example.com", "newTab": true}
 # or navigate existing tab:
 {"url": "https://example.com", "tabId": 12345}
+# set active=true only when you want to focus that tab
+# default behavior is background-first (active=false)
 ```
 
 ### Element Interaction
