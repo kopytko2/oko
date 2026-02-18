@@ -115,4 +115,10 @@ describe('command argument validation', () => {
     expect(options.includeHost).toEqual(['api\\\\.example\\\\.com'])
     expect(options.excludeHost).toEqual(['analytics'])
   })
+
+  it('parses connect code command', () => {
+    const parsed = parseCommand(['connect', 'code', '--copy'])
+    expect(parsed.key).toBe('connect.code')
+    expect(parsed.options).toEqual({ copy: true })
+  })
 })

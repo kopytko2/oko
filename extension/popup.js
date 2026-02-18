@@ -8,6 +8,7 @@ const statusDiv = document.getElementById('status')
 const pickerBtn = document.getElementById('pickerBtn')
 const shortcutKey = document.getElementById('shortcutKey')
 const quickConfigInput = document.getElementById('quickConfig')
+const clipboardBtn = document.getElementById('clipboardBtn')
 const statusDot = document.getElementById('statusDot')
 const statusText = document.getElementById('statusText')
 const collapseBtn = document.getElementById('collapseBtn')
@@ -18,6 +19,7 @@ const reconnectBtn = document.getElementById('reconnectBtn')
 
 let originalUrl = ''
 let originalToken = ''
+let clipboardConnectInFlight = false
 
 const isMac = navigator.platform.toUpperCase().includes('MAC')
 const shortcutModifier = isMac ? 'option' : 'alt'
@@ -161,6 +163,70 @@ async function saveAndConnect(url, token) {
   await testConnection()
 }
 
+function shouldAutoTryClipboard() {
+  if (clipboardConnectInFlight) return false
+  if (statusText.textContent === 'Connected') return false
+
+  const hasNonDefaultConfig = originalToken || (originalUrl && originalUrl !== 'http://localhost:8129')
+  return !hasNonDefaultConfig
+}
+
+async function connectFromClipboard({ silent = false, force = false } = {}) {
+  if (clipboardConnectInFlight) {
+    return false
+  }
+
+  if (!force && !shouldAutoTryClipboard()) {
+    return false
+  }
+
+  if (!navigator.clipboard?.readText) {
+    if (!silent) {
+      showStatus('error', 'Clipboard access unavailable. Paste code manually.')
+    }
+    return false
+  }
+
+  clipboardConnectInFlight = true
+
+  try {
+    const text = await navigator.clipboard.readText()
+    const parsed = parseConfig(text)
+
+    if (parsed.url && parsed.token) {
+      if (!silent) {
+        showStatus('testing', 'Connecting from clipboard...')
+      }
+      await saveAndConnect(parsed.url, parsed.token)
+      return true
+    }
+
+    if (parsed.url || parsed.token) {
+      if (parsed.url) backendUrlInput.value = parsed.url
+      if (parsed.token) authTokenInput.value = parsed.token
+      checkDirty()
+
+      if (!silent) {
+        const detected = `${parsed.url ? 'URL' : ''}${parsed.url && parsed.token ? ' + ' : ''}${parsed.token ? 'Token' : ''}`
+        showStatus('success', `Detected in clipboard: ${detected}`)
+      }
+      return false
+    }
+
+    if (!silent) {
+      showStatus('error', 'No Oko connection code found in clipboard')
+    }
+    return false
+  } catch {
+    if (!silent) {
+      showStatus('error', 'Clipboard read blocked. Paste code manually.')
+    }
+    return false
+  } finally {
+    clipboardConnectInFlight = false
+  }
+}
+
 async function refreshConnectionStatus() {
   // First check WebSocket status from background
   try {
@@ -297,6 +363,7 @@ async function loadSettings() {
   const detected = await autoDetectLocalBackend()
   if (!detected) {
     await refreshConnectionStatus()
+    await connectFromClipboard({ silent: true })
   }
 }
 
@@ -336,6 +403,12 @@ reconnectBtn.addEventListener('click', async () => {
     showStatus('error', 'Reconnect failed')
   }
 })
+
+if (clipboardBtn) {
+  clipboardBtn.addEventListener('click', async () => {
+    await connectFromClipboard({ force: true })
+  })
+}
 
 // Quick config paste - now auto-saves and connects
 quickConfigInput.addEventListener('input', async () => {

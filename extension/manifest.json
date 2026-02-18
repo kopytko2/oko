@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "description": "Browser automation tools for Ona development environments",
   "permissions": [
+    "clipboardRead",
     "storage",
     "tabs",
     "scripting",

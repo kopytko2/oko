@@ -92,6 +92,10 @@ function stringifyText(data, commandKey) {
     return lines.join('\n')
   }
 
+  if (commandKey === 'connect.code') {
+    return data.connectionCode || ''
+  }
+
   return JSON.stringify(data, null, 2)
 }
 

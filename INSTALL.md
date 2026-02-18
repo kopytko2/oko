@@ -28,7 +28,7 @@ You should see "Oko - Browser Automation for Ona" appear in your extensions.
 
 1. Ask Ona for the connection code (just say "give me the oko code")
 2. Click the Oko extension icon in your Chrome toolbar
-3. Paste the code into the "Connection Code" field
+3. Click **Connect from Clipboard** (or paste into "Connection Code")
 4. The status should change to "Connected"
 
 That's it! Ona can now interact with your browser.
@@ -49,7 +49,7 @@ Once connected, you can ask Ona to:
 ## Troubleshooting
 
 **Extension shows "Disconnected"**
-- Ask Ona for a new connection code and paste it again
+- Ask Ona for a new connection code, then click **Connect from Clipboard** again
 
 **Can't find the extension icon**
 - Click the puzzle piece icon in Chrome's toolbar

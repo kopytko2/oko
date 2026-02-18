@@ -19,6 +19,9 @@ Use the Oko CLI first. It wraps auth, retries, and debugger cleanup:
 # Health + connectivity diagnostics
 npm run oko -- doctor
 
+# Generate extension connection code (optionally copy to clipboard)
+npm run oko -- connect code --copy
+
 # List tabs
 npm run oko -- tabs list
 
@@ -52,13 +55,8 @@ Before using any browser APIs, ensure Oko is connected:
 
 1. **Check if backend is running:** `curl http://localhost:8129/api/health`
 2. **If not running:** Start with `gitpod automations service start oko-backend` or `cd backend && npm start`
-3. **Get connection code:** Read from backend logs or generate:
-   ```bash
-   TOKEN=$(cat /tmp/oko-auth-token)
-   URL="https://8129--${GITPOD_ENVIRONMENT_ID}.${GITPOD_REGION:-us-east-1-01}.gitpod.dev"
-   echo "oko:$(echo -n "${URL}|${TOKEN}" | base64 -w 0)"
-   ```
-4. **User must paste code in extension popup** - you cannot do this programmatically
+3. **Generate a connection code:** `npm run oko -- connect code --copy`
+4. **User connects extension:** Open popup and click **Connect from Clipboard** (or paste manually)
 
 ## IMPORTANT: Checking Connection Status
 
@@ -68,7 +66,7 @@ npm run oko -- doctor
 ```
 If you get `503 No extension connected`, ask the user to:
 - Open the Oko extension popup in Chrome
-- Paste the connection code
+- Click **Connect from Clipboard** (or paste the connection code)
 - Verify status shows "Connected"
 
 ## Quick setup (for using the extension)
@@ -90,9 +88,9 @@ Extension:
 ## Using the extension
 
 **Quick connect (recommended):**
-1. Start the backend - it outputs a connection code like `oko:aHR0cHM6...`
+1. Start backend, then run `npm run oko -- connect code --copy`
 2. Open the Oko popup from the toolbar
-3. Paste the connection code into the "Connection Code" field
+3. Click **Connect from Clipboard** (or paste into "Connection Code")
 4. The extension auto-saves and connects
 
 **Manual setup:**
@@ -189,7 +187,7 @@ curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
 
 | Error | Meaning | Solution |
 |-------|---------|----------|
-| 503 "No extension connected" | Extension not connected to backend | Ask user to open popup and paste connection code |
+| 503 "No extension connected" | Extension not connected to backend | Ask user to open popup and connect from clipboard |
 | 504 "Extension timeout" | Extension didn't respond | Extension may be suspended; ask user to interact with browser |
 | 401 "Unauthorized" | Invalid or missing token | Check token matches `/tmp/oko-auth-token` |
 | "No debugger session" | Debugger not enabled for tab | Call `/api/browser/debugger/enable` first |
@@ -197,6 +195,5 @@ curl -X POST -H "X-Auth-Token: $TOKEN" -H "Content-Type: application/json" \
 ## Anti-patterns
 
 - **DON'T** assume the extension is connected - always check first
-- **DON'T** try to automate extension setup - user must paste connection code manually
 - **DON'T** forget to disable debugger when done - it shows a yellow banner to the user
 - **DON'T** use localhost URLs when telling user about the backend - use the Gitpod URL
